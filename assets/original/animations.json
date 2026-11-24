@@ -1,0 +1,148 @@
+{
+  "animations": {
+    "walk": {
+      "label": "걷기",
+      "animation": "animations/walk.webp",
+      "sprite": "sprites/walk.png",
+      "loop": true,
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 384,
+          "height": 384,
+          "durationMs": 140
+        },
+        {
+          "x": 384,
+          "y": 0,
+          "width": 384,
+          "height": 384,
+          "durationMs": 110
+        },
+        {
+          "x": 768,
+          "y": 0,
+          "width": 384,
+          "height": 384,
+          "durationMs": 140
+        },
+        {
+          "x": 1152,
+          "y": 0,
+          "width": 384,
+          "height": 384,
+          "durationMs": 110
+        }
+      ]
+    },
+    "dance": {
+      "label": "춤추기",
+      "animation": "animations/dance.webp",
+      "sprite": "sprites/dance.png",
+      "loop": true,
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 384,
+          "height": 384,
+          "durationMs": 190
+        },
+        {
+          "x": 384,
+          "y": 0,
+          "width": 384,
+          "height": 384,
+          "durationMs": 130
+        },
+        {
+          "x": 768,
+          "y": 0,
+          "width": 384,
+          "height": 384,
+          "durationMs": 190
+        },
+        {
+          "x": 1152,
+          "y": 0,
+          "width": 384,
+          "height": 384,
+          "durationMs": 130
+        }
+      ]
+    },
+    "rap": {
+      "label": "랩하기",
+      "animation": "animations/rap.webp",
+      "sprite": "sprites/rap.png",
+      "loop": true,
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 384,
+          "height": 384,
+          "durationMs": 150
+        },
+        {
+          "x": 384,
+          "y": 0,
+          "width": 384,
+          "height": 384,
+          "durationMs": 100
+        },
+        {
+          "x": 768,
+          "y": 0,
+          "width": 384,
+          "height": 384,
+          "durationMs": 130
+        },
+        {
+          "x": 1152,
+          "y": 0,
+          "width": 384,
+          "height": 384,
+          "durationMs": 110
+        }
+      ]
+    },
+    "drag": {
+      "label": "앱 창 끌기",
+      "animation": "animations/drag.webp",
+      "sprite": "sprites/drag.png",
+      "loop": true,
+      "frames": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 384,
+          "height": 384,
+          "durationMs": 240
+        },
+        {
+          "x": 384,
+          "y": 0,
+          "width": 384,
+          "height": 384,
+          "durationMs": 150
+        },
+        {
+          "x": 768,
+          "y": 0,
+          "width": 384,
+          "height": 384,
+          "durationMs": 230
+        },
+        {
+          "x": 1152,
+          "y": 0,
+          "width": 384,
+          "height": 384,
+          "durationMs": 160
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,33 @@
+#pragma code_page(65001)
+// 에셋을 EXE 안에 넣어 EXE 하나만 받아도 실행되게 한다 (처음 실행할 때 %LOCALAPPDATA% 로 풀어 씀)
+#include "resource_ids.h"
+1 ICON "usagi.ico"
+IDR_SPRITE_WALK  RCDATA "../assets/sprites/walk.png"
+IDR_SPRITE_DANCE RCDATA "../assets/sprites/dance.png"
+IDR_SPRITE_RAP   RCDATA "../assets/sprites/rap.png"
+IDR_SPRITE_DRAG  RCDATA "../assets/sprites/drag.png"
+IDR_USAGI_INI    RCDATA "../assets/usagi.ini"
+IDR_SETTINGS_INI RCDATA "../settings.ini"
+
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "041204B0"
+    BEGIN
+      VALUE "FileDescription", "Usagi Desktop Pet"
+      VALUE "ProductName", "Usagi Desktop Pet"
+      VALUE "FileVersion", "1.0.0"
+      VALUE "ProductVersion", "1.0.0"
+      VALUE "OriginalFilename", "UsagiDesktopPet.exe"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0412, 1200
+  END
+END

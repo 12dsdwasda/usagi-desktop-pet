@@ -1,0 +1,7 @@
+#pragma once
+#define IDR_SPRITE_WALK 201
+#define IDR_SPRITE_DANCE 202
+#define IDR_SPRITE_RAP 203
+#define IDR_SPRITE_DRAG 204
+#define IDR_USAGI_INI 205
+#define IDR_SETTINGS_INI 206
