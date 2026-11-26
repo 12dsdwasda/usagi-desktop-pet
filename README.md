@@ -1,4 +1,4 @@
-# 우사기 데스크톱 펫 (Windows)
+# 우사기 데스크톱 펫 (Windows · macOS)
 
 우사기가 사용 중인 프로그램 위에서 화면을 돌아다니고, 음악이 나오면 춤을 추거나 랩을 합니다. 트레이에서 고른 앱 창은 제목 표시줄을 잡고 실제로 끌고 갑니다.
 
@@ -44,6 +44,31 @@ cmake --build build --config Release
 - **SmartScreen:** 코드 서명이 없어서 인터넷에서 받으면 처음 실행할 때 SmartScreen 경고가 뜹니다. “추가 정보 → 실행”을 누르면 됩니다. 경고를 없애려면 코드 서명 인증서가 필요합니다.
 - **다시 만드는 법:** `build.bat`로 빌드한 뒤 `build\Release\usagi_pet.exe`를 `UsagiDesktopPet.exe`로 복사합니다.
 - **요구 사항:** Windows 10 1703 이상, 64비트.
+
+## macOS 버전
+
+`mac/` 폴더에 Swift/AppKit으로 다시 만든 Mac 판이 있습니다. macOS 12 이상, Apple 실리콘·Intel 공용(유니버설)입니다.
+
+**설치:** [Releases](https://github.com/12dsdwasda/usagi-desktop-pet/releases/latest)에서 `UsagiDesktopPet-<버전>-mac.zip`을 받아 풀고, `UsagiDesktopPet.app`을 응용 프로그램 폴더로 옮깁니다.
+
+Apple 개발자 서명이 없는 앱이라서 처음 실행할 때 "확인되지 않은 개발자" 경고가 뜹니다. 다음 중 하나로 여세요.
+- 앱을 **우클릭 → 열기 → 열기**
+- 또는 한 번 실행을 시도한 뒤 **시스템 설정 → 개인정보 보호 및 보안 → "그래도 열기"**
+- 또는 터미널에서 `xattr -cr /Applications/UsagiDesktopPet.app`
+
+실행하면 Dock 아이콘 없이 **메뉴 막대에 우사기 아이콘**이 생기고, 메뉴는 Windows 트레이 메뉴와 같습니다. 대화창 단축키는 ⌃⌥U입니다.
+
+**권한:**
+- **손쉬운 사용**(메뉴 → "손쉬운 사용 권한 허용하기…"): 다른 앱 창 끌기와, 던질 때 클릭·키보드를 막는 데 필요합니다. 권한이 없어도 걷기, 춤, 잡기·던지기, 포인터 가져가기, 포인터 던지기는 됩니다. 이때 입력 막기는 마우스 이동만 막힙니다.
+- **자동화(스포티파이/Music)**: 처음 곡을 읽을 때 macOS가 묻습니다. 허용해야 따라 부르기가 됩니다.
+
+**Windows 판과 다른 점:**
+- 음악 반응은 소리를 듣는 방식이 아니라 **스포티파이나 Apple Music이 재생 중일 때** 춤·랩을 합니다. 유튜브 같은 브라우저 소리에는 반응하지 않습니다.
+- 녹음한 목소리와 메모장 장난은 없습니다. 에이전트의 `write_note`는 문서/우사기 메모에 저장한 뒤 텍스트 편집기로 엽니다.
+- Gemini 키는 키체인에 저장됩니다. `GEMINI_API_KEY` 환경 변수도 읽습니다.
+- 설정은 `defaults`(UserDefaults)에 저장됩니다. 예: `defaults write io.github.12dsdwasda.usagi-desktop-pet sizePt 180`
+
+**직접 빌드**(Xcode 명령줄 도구 필요): `bash mac/build.sh` → `dist-mac/`. GitHub Actions(`.github/workflows/mac.yml`)가 push할 때마다 빌드하고, 8초간 실행해 화면을 캡처합니다.
 
 ## 트레이 메뉴
 
