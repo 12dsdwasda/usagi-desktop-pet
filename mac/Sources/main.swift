@@ -318,7 +318,7 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
     }
 
     func cursorFree() -> Bool {
-        NSEvent.pressedMouseButtons == 0 && CGCursorIsVisible() != 0
+        NSEvent.pressedMouseButtons == 0
     }
 
     func tickAngry(_ t: Double, _ dt: Double) {
