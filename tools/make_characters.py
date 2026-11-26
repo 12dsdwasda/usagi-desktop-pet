@@ -11,8 +11,12 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage as nd
 
-POSES, HELD, DST = sys.argv[1], sys.argv[2], sys.argv[3]
-PREVIEW = sys.argv[4] if len(sys.argv) > 4 else None
+args = sys.argv[1:]
+WALK = None
+if '--walk' in args:  # 캐릭터별 4프레임 걷기 시트 (행 = 캐릭터, 열 = 프레임)
+    i = args.index('--walk'); WALK = args[i + 1]; del args[i:i + 2]
+POSES, HELD, DST = args[0], args[1], args[2]
+PREVIEW = args[3] if len(args) > 3 else None
 IDS = ['hachiware', 'chiikawa', 'rakko', 'shisa', 'momonga']
 FW = FH = 384
 BASE_Y = 344
@@ -22,7 +26,7 @@ S_DRAG = 1.28     # 창 끌기 포즈는 창 때문에 캐릭터가 작게 그�
 HOLD = (232, 52)  # held 프레임에서 장갑(=마우스 포인터) 위치
 GRIP_X = 150      # drag 프레임에서 손 위치
 
-def cells(sheet, rows, split=None):
+def cells(sheet, rows, split=None, n=5):
     """행마다 x 순서로 5칸을 돌려준다. split[row] = 붙어 있는 두 칸을 나눌 x 목록"""
     a = sheet[..., 3] > 20
     lab, _ = nd.label(nd.binary_dilation(a, iterations=6))
@@ -40,7 +44,7 @@ def cells(sheet, rows, split=None):
                 xs = [b[0]] + cut + [b[1]]
                 nb += list(zip(xs[:-1], xs[1:]))
             boxes = nb
-        assert len(boxes) == 5, (r, boxes)
+        assert len(boxes) == n, (r, boxes)
         row = []
         for x0, x1 in boxes:
             c = sheet[:, x0:x1].copy()
@@ -154,6 +158,11 @@ pose = np.array(Image.open(POSES).convert('RGBA'))
 held = np.array(Image.open(HELD).convert('RGBA'))
 H = pose.shape[0] / 4
 P = cells(pose, [(i * H, (i + 1) * H) for i in range(4)], split={3: [1083]})
+W = None
+if WALK:
+    wk = np.array(Image.open(WALK).convert('RGBA'))
+    WH = wk.shape[0] / 5
+    W = cells(wk, [(i * WH, (i + 1) * WH) for i in range(5)], n=4)
 G = cells(held, [(0, held.shape[0] / 2), (held.shape[0] / 2, held.shape[0])])
 previews = []
 for ci, cid in enumerate(IDS):
@@ -176,6 +185,12 @@ for ci, cid in enumerate(IDS):
             f0 = place(c, GRIP_X - hx, BASE_Y - np.nonzero(b)[0].max())
             gy = hy + (BASE_Y - np.nonzero(b)[0].max())
             frames = anim_frames(f0, (GRIP_X, gy), params)
+        elif name == 'walk' and W:
+            # 그려진 4프레임 걷기: 예전 걷기 포즈와 몸 키가 같도록 배율을 맞춘다
+            bh = lambda im: np.ptp(np.nonzero(body(im))[0])
+            k = bh(c) / np.median([bh(scaled(w, 1)) for w in W[ci]])
+            frames = [ground(scaled(w, k)) for w in W[ci]]
+            durs = [130, 130, 130, 130]
         else:
             f0 = ground(c)
             frames = anim_frames(f0, (192, BASE_Y), params)
