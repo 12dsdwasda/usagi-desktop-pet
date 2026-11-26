@@ -866,6 +866,7 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
     func agentSay(_ text: String, _ seconds: Double) { say(text.count > 160 ? String(text.prefix(157)) + "…" : text, seconds) }
     func agentName() -> String { curChar.name }
     func agentPersona() -> String { curChar.persona }
+    func agentCharId() -> String { curChar.id }
     func agentThinking(_ on: Bool) { if on && cfg.bubbles { bubble.say("음…", 60) } }
     func agentAnchor() -> NSPoint { headTop }
     func agentStatus() -> String {

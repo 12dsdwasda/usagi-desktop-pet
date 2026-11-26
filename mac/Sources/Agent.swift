@@ -34,6 +34,7 @@ protocol AgentHost: AnyObject {
     func agentThinking(_ on: Bool)
     func agentName() -> String
     func agentPersona() -> String
+    func agentCharId() -> String
     func agentAnchor() -> NSPoint
     func agentStatus() -> String
     func agentListWindows() -> [String]
@@ -76,7 +77,9 @@ final class Agent: NSObject, NSWindowDelegate {
     private var nextTimer = 1
 
     private var window: NSPanel?
-    private var log: NSTextView!
+    private var log: BubbleListView!
+    private var header: ChatHeaderView!
+    private var deco: DecoWindow?
     private var input: NSTextField!
     private var sendBtn: NSButton!
 
@@ -93,58 +96,109 @@ final class Agent: NSObject, NSWindowDelegate {
         let a = host?.agentAnchor() ?? NSPoint(x: 400, y: 200)
         let sc = NSScreen.screens.first { $0.frame.contains(a) } ?? NSScreen.main!
         let vf = sc.visibleFrame
-        let W: CGFloat = 440, H: CGFloat = 360
+        let W: CGFloat = 460, H: CGFloat = 400, HH: CGFloat = 42, m: CGFloat = 10, bar: CGFloat = 36
         var x = a.x + (vf.maxX - a.x >= a.x - vf.minX ? 170 : -170 - W)
         x = max(vf.minX, min(x, vf.maxX - W))
-        let rect = NSRect(x: x, y: vf.minY + 12, width: W, height: H)
-        let w = NSPanel(contentRect: rect, styleMask: [.titled, .closable, .resizable, .utilityWindow], backing: .buffered, defer: false)
+        let rect = NSRect(x: x, y: vf.minY + 12, width: W, height: min(H, vf.height - 110))
+        let w = NSPanel(contentRect: rect, styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .utilityWindow],
+                        backing: .buffered, defer: false)
         w.title = name + "와 대화"
+        w.titleVisibility = .hidden
+        w.titlebarAppearsTransparent = true
+        for b in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { w.standardWindowButton(b)?.isHidden = true }
+        w.isMovableByWindowBackground = false
+        w.backgroundColor = ChatColor.bg
+        w.appearance = NSAppearance(named: .aqua)
+        w.minSize = NSSize(width: 360, height: 280)
         w.level = .floating
         w.isReleasedWhenClosed = false
         w.hidesOnDeactivate = false
         w.delegate = self
-        let cv = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
-        let scroll = NSScrollView(frame: NSRect(x: 8, y: 46, width: W - 16, height: H - 54))
+        let cv = NSView(frame: NSRect(x: 0, y: 0, width: W, height: rect.height))
+        cv.wantsLayer = true
+        cv.layer?.backgroundColor = ChatColor.bg.cgColor
+        header = ChatHeaderView(frame: NSRect(x: 0, y: rect.height - HH, width: W, height: HH))
+        header.autoresizingMask = [.width, .minYMargin]
+        header.title = name + "와 대화"
+        header.onClose = { [weak w] in w?.orderOut(nil) }
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: bar + 2 * m, width: W, height: rect.height - HH - bar - 2 * m - 2))
         scroll.autoresizingMask = [.width, .height]
         scroll.hasVerticalScroller = true
-        scroll.borderType = .bezelBorder
-        log = NSTextView(frame: scroll.bounds)
-        log.isEditable = false
-        log.font = NSFont.systemFont(ofSize: 13)
+        scroll.scrollerStyle = .overlay
+        scroll.drawsBackground = true
+        scroll.backgroundColor = ChatColor.bg
+        scroll.borderType = .noBorder
+        log = BubbleListView(frame: NSRect(x: 0, y: 0, width: scroll.contentSize.width, height: scroll.contentSize.height))
         log.autoresizingMask = [.width]
-        log.textContainerInset = NSSize(width: 4, height: 4)
         scroll.documentView = log
-        input = NSTextField(frame: NSRect(x: 8, y: 10, width: W - 16 - 3 * 66, height: 26))
+        scroll.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: scroll, queue: .main) { [weak self] _ in
+            self?.log?.relayout()
+        }
+        scroll.postsFrameChangedNotifications = true
+        let bw: CGFloat = 66, kw: CGFloat = 44, gap: CGFloat = 6
+        let pillW = W - 2 * m - 2 * bw - kw - 3 * gap
+        let pill = PillView(frame: NSRect(x: m, y: m + 2, width: pillW, height: bar - 2))
+        pill.autoresizingMask = [.width]
+        input = NSTextField(frame: NSRect(x: m + 14, y: m + 2 + (bar - 2 - 20) / 2, width: pillW - 28, height: 20))
         input.autoresizingMask = [.width]
-        input.placeholderString = "우사기한테 말하기 (Enter)"
+        input.isBordered = false
+        input.drawsBackground = false
+        input.focusRingType = .none
+        input.font = NSFont.systemFont(ofSize: 13.5)
+        input.textColor = ChatColor.petText
+        input.placeholderString = name + "한테 말하기 (Enter)"
         input.target = self
         input.action = #selector(send)
-        sendBtn = NSButton(title: "보내기", target: self, action: #selector(send))
-        let newBtn = NSButton(title: "새 대화", target: self, action: #selector(newChat))
-        let keyBtn = NSButton(title: "키", target: self, action: #selector(keyDialog))
-        for (i, b) in [sendBtn!, newBtn, keyBtn].enumerated() {
-            b.frame = NSRect(x: W - 8 - CGFloat(3 - i) * 66 + 4, y: 8, width: 62, height: 30)
-            b.bezelStyle = .rounded
+        let sendB = PillButton(title: "보내기", target: self, action: #selector(send))
+        let newB = PillButton(title: "새 대화", target: self, action: #selector(newChat))
+        let keyB = PillButton(title: "키", target: self, action: #selector(keyDialog))
+        sendB.fill = ChatColor.send; newB.fill = ChatColor.new; keyB.fill = ChatColor.key
+        sendBtn = sendB
+        var bx = W - m - kw - 2 * bw - 2 * gap
+        for (b, bwid) in [(sendB, bw), (newB, bw), (keyB, kw)] {
+            b.isBordered = false
+            b.frame = NSRect(x: bx, y: m, width: bwid, height: bar)
             b.autoresizingMask = [.minXMargin]
             cv.addSubview(b)
+            bx += bwid + gap
         }
         cv.addSubview(scroll)
+        cv.addSubview(pill)
         cv.addSubview(input)
+        cv.addSubview(header)
         w.contentView = cv
         window = w
+        deco = DecoWindow(chat: w, current: { [weak self] in self?.host?.agentCharId() ?? "usagi" },
+                          busy: { [weak self] in self?.busy ?? false })
         newChat()
     }
 
     private func append(_ s: String) {
         guard let log = log else { return }
-        let a = NSAttributedString(string: s + "\n", attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.textColor])
-        log.textStorage?.append(a)
-        log.scrollToEndOfDocument(nil)
+        if s.hasPrefix("나: ") {
+            log.add(.user, who: "나", id: "", text: String(s.dropFirst(3)))
+        } else if s.hasPrefix(name + ": ") {
+            log.add(.pet, who: name, id: host?.agentCharId() ?? "usagi", text: String(s.dropFirst(name.count + 2)))
+        } else if s.hasPrefix("  [") {
+            log.add(.tool, who: "", id: "", text: String(s.dropFirst(2)))
+        } else {
+            var t = s
+            if t.hasPrefix("(") && t.hasSuffix(")") { t = String(t.dropFirst().dropLast()) }
+            log.add(.system, who: "", id: "", text: t)
+        }
     }
 
     private func updateUi() {
         sendBtn?.isEnabled = !busy
-        window?.title = name + (busy ? "와 대화 — 생각 중…" : "와 대화")
+        sendBtn?.needsDisplay = true
+        let t = name + (busy ? "와 대화 · 생각 중…" : "와 대화")
+        window?.title = t
+        header?.title = t
+        log?.typingWho = name
+        log?.typingId = host?.agentCharId() ?? "usagi"
+        if log?.typing != busy { log?.typing = busy }
+        input?.placeholderString = name + "한테 말하기 (Enter)"
     }
 
     @objc func newChat() {
@@ -152,8 +206,8 @@ final class Agent: NSObject, NSWindowDelegate {
         gen += 1
         busy = false
         rounds = 0
-        log?.string = ""
-        append("(새 대화) 우사기한테 뭐든 말해 봐. 예: \"유튜브 열어줘\", \"10분 뒤에 물 마시라고 알려줘\", \"지금 무슨 노래야?\"")
+        log?.clear()
+        append("새 대화 시작! " + name + "한테 뭐든 말해 봐. 예: \"유튜브 열어줘\", \"10분 뒤에 물 마시라고 알려줘\", \"지금 무슨 노래야?\"")
         host?.agentThinking(false)
         updateUi()
     }

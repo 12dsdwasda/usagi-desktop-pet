@@ -40,8 +40,8 @@ IDR_SETTINGS_INI RCDATA "../settings.ini"
 345 RCDATA "../assets/characters/momonga/held.png"
 
 1 VERSIONINFO
-FILEVERSION 1,3,1,0
-PRODUCTVERSION 1,3,1,0
+FILEVERSION 1,4,0,0
+PRODUCTVERSION 1,4,0,0
 FILEOS 0x40004
 FILETYPE 0x1
 BEGIN
@@ -51,8 +51,8 @@ BEGIN
     BEGIN
       VALUE "FileDescription", "Usagi Desktop Pet"
       VALUE "ProductName", "Usagi Desktop Pet"
-      VALUE "FileVersion", "1.3.1"
-      VALUE "ProductVersion", "1.3.1"
+      VALUE "FileVersion", "1.4.0"
+      VALUE "ProductVersion", "1.4.0"
       VALUE "OriginalFilename", "UsagiDesktopPet.exe"
     END
   END

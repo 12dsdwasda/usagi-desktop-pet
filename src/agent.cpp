@@ -1,7 +1,9 @@
 #include "agent.h"
+#include "chatui.h"
 #include "gemini.h"
 #include "json.h"
 #include <shellapi.h>
+#include <windowsx.h>
 #include <shlobj.h>
 #include <shellscalingapi.h>
 #include <algorithm>
@@ -34,6 +36,9 @@ struct State {
     HWND msgWnd{}, chat{}, log{}, input{}, sendBtn{}, newBtn{}, keyBtn{};
     HFONT font{};
     UINT fontDpi = 0;
+    RECT pillRc{}, closeRc{};  // 입력칸 알약, 닫기 단추
+    int headerH = 40;
+    bool closeHot = false;
     Json history = Json::Arr_();
     bool busy = false;
     int gen = 0, rounds = 0;
@@ -109,27 +114,29 @@ Json Err(const std::wstring& msg) {
 // ---------- 대화창 ----------
 void Append(const std::wstring& line) {
     if (!A.log) return;
-    std::wstring t;
-    for (wchar_t c : line) {
-        if (c == L'\n') t += L"\r\n";
-        else if (c != L'\r') t += c;
+    std::wstring name = A.host.name();
+    if (line.rfind(L"나: ", 0) == 0) {
+        ChatUi::Add(A.log, ChatUi::User, L"나", L"", line.substr(3));
+    } else if (line.rfind(name + L": ", 0) == 0) {
+        ChatUi::Add(A.log, ChatUi::Pet, name, A.host.charId(), line.substr(name.size() + 2));
+    } else if (line.rfind(L"  [", 0) == 0) {
+        ChatUi::Add(A.log, ChatUi::Tool, L"", L"", line.substr(2));
+    } else {
+        std::wstring t = line;
+        if (t.size() >= 2 && t.front() == L'(' && t.back() == L')') t = t.substr(1, t.size() - 2);
+        ChatUi::Add(A.log, ChatUi::System, L"", L"", t);
     }
-    t += L"\r\n";
-    int n = GetWindowTextLengthW(A.log);
-    if (n > 60000) {  // 너무 길어지면 앞부분을 버림
-        SendMessageW(A.log, EM_SETSEL, 0, 20000);
-        SendMessageW(A.log, EM_REPLACESEL, FALSE, LPARAM(L""));
-        n = GetWindowTextLengthW(A.log);
-    }
-    SendMessageW(A.log, EM_SETSEL, n, n);
-    SendMessageW(A.log, EM_REPLACESEL, FALSE, LPARAM(t.c_str()));
-    SendMessageW(A.log, EM_SCROLLCARET, 0, 0);
 }
+
+std::wstring Title() { return A.host.name() + (A.busy ? L"와 대화 · 생각 중…" : L"와 대화"); }
 
 void UpdateUi() {
     if (!A.chat) return;
     EnableWindow(A.sendBtn, !A.busy);
-    SetWindowTextW(A.chat, (A.host.name() + (A.busy ? L"와 대화 — 생각 중…" : L"와 대화")).c_str());
+    SetWindowTextW(A.chat, Title().c_str());
+    ChatUi::SetTyping(A.log, A.busy, A.host.name(), A.host.charId());
+    RECT hr{0, 0, 10000, A.headerH};
+    InvalidateRect(A.chat, &hr, FALSE);
 }
 
 int Dip(int v) { return MulDiv(v, int(A.fontDpi ? A.fontDpi : 96), 96); }
@@ -138,7 +145,7 @@ void ApplyFont(UINT dpi) {
     if (A.font && A.fontDpi == dpi) return;
     HFONT old = A.font;
     A.fontDpi = dpi;
-    A.font = CreateFontW(-MulDiv(10, int(dpi), 72), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0,
+    A.font = CreateFontW(-MulDiv(11, int(dpi), 72), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0,
                          L"Malgun Gothic");
     for (HWND c : {A.log, A.input, A.sendBtn, A.newBtn, A.keyBtn})
         if (c) SendMessageW(c, WM_SETFONT, WPARAM(A.font), TRUE);
@@ -148,18 +155,24 @@ void ApplyFont(UINT dpi) {
 void Layout() {
     RECT rc;
     GetClientRect(A.chat, &rc);
-    int m = Dip(8), h = Dip(30), bw = Dip(60), kw = Dip(56);
     int W = rc.right, H = rc.bottom;
-    MoveWindow(A.log, m, m, W - 2 * m, std::max(10, H - 3 * m - h), TRUE);
-    int y = H - m - h;
-    int inputW = std::max(40, W - 2 * m - bw - 2 * kw - 3 * Dip(6));
-    MoveWindow(A.input, m, y, inputW, h, TRUE);
-    int x = m + inputW + Dip(6);
-    MoveWindow(A.sendBtn, x, y, bw, h, TRUE);
-    x += bw + Dip(6);
-    MoveWindow(A.newBtn, x, y, kw, h, TRUE);
-    x += kw + Dip(6);
-    MoveWindow(A.keyBtn, x, y, kw, h, TRUE);
+    int m = Dip(10), bar = Dip(36), gap = Dip(6), bw = Dip(66), nw = Dip(66), kw = Dip(44);
+    A.headerH = Dip(42);
+    int cs = Dip(24);
+    A.closeRc = {W - Dip(12) - cs, (A.headerH - cs) / 2 - Dip(2), W - Dip(12), (A.headerH - cs) / 2 - Dip(2) + cs};
+    MoveWindow(A.log, 0, A.headerH + Dip(2), W, std::max(10, H - A.headerH - Dip(2) - bar - 2 * m), TRUE);
+    int y = H - m - bar;
+    int pillW = std::max(Dip(60), W - 2 * m - bw - nw - kw - 3 * gap);
+    A.pillRc = {m, y, m + pillW, y + bar - Dip(2)};
+    int eh = Dip(22);
+    MoveWindow(A.input, m + Dip(14), y + (bar - Dip(2) - eh) / 2, pillW - Dip(28), eh, TRUE);
+    int x = m + pillW + gap;
+    MoveWindow(A.sendBtn, x, y, bw, bar, TRUE);
+    x += bw + gap;
+    MoveWindow(A.newBtn, x, y, nw, bar, TRUE);
+    x += nw + gap;
+    MoveWindow(A.keyBtn, x, y, kw, bar, TRUE);
+    InvalidateRect(A.chat, nullptr, FALSE);
 }
 
 void StartRequest();
@@ -169,8 +182,8 @@ void NewChat() {
     A.gen++;
     A.busy = false;
     A.rounds = 0;
-    if (A.log) SetWindowTextW(A.log, L"");
-    Append(L"(새 대화) 우사기한테 뭐든 말해 봐. 예: \"유튜브 열어줘\", \"10분 뒤에 물 마시라고 알려줘\", \"메모장에 장보기 목록 써줘\"");
+    ChatUi::Clear(A.log);
+    Append(L"새 대화 시작! " + A.host.name() + L"한테 뭐든 말해 봐. 예: \"유튜브 열어줘\", \"10분 뒤에 물 마시라고 알려줘\", \"지금 무슨 노래야?\"");
     A.host.thinking(false);
     UpdateUi();
 }
@@ -550,22 +563,98 @@ LRESULT CALLBACK ChatProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     switch (m) {
         case WM_CREATE: {
             A.chat = h;
-            DWORD es = WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL;
-            A.log = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", es, 0, 0, 10, 10, h, HMENU(INT_PTR(IDC_LOG)), A.inst, nullptr);
-            A.input = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 0, 0, 10,
-                                      10, h, HMENU(INT_PTR(IDC_INPUT)), A.inst, nullptr);
-            A.sendBtn = CreateWindowExW(0, L"BUTTON", L"보내기", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, 0, 0, 10, 10, h,
-                                        HMENU(INT_PTR(IDOK)), A.inst, nullptr);
-            A.newBtn = CreateWindowExW(0, L"BUTTON", L"새 대화", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 10, 10, h,
-                                       HMENU(INT_PTR(IDC_NEW)), A.inst, nullptr);
-            A.keyBtn = CreateWindowExW(0, L"BUTTON", L"키", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 10, 10, h,
-                                       HMENU(INT_PTR(IDC_KEYBTN)), A.inst, nullptr);
-            SendMessageW(A.input, EM_SETCUEBANNER, TRUE, LPARAM(L"우사기한테 말하기 (Enter)"));
+            A.log = ChatUi::CreateLog(h, IDC_LOG);
+            A.input = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 0, 0, 10, 10, h,
+                                      HMENU(INT_PTR(IDC_INPUT)), A.inst, nullptr);
+            DWORD bs = WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW;
+            A.sendBtn = CreateWindowExW(0, L"BUTTON", L"보내기", bs, 0, 0, 10, 10, h, HMENU(INT_PTR(IDOK)), A.inst, nullptr);
+            A.newBtn = CreateWindowExW(0, L"BUTTON", L"새 대화", bs, 0, 0, 10, 10, h, HMENU(INT_PTR(IDC_NEW)), A.inst, nullptr);
+            A.keyBtn = CreateWindowExW(0, L"BUTTON", L"키", bs, 0, 0, 10, 10, h, HMENU(INT_PTR(IDC_KEYBTN)), A.inst, nullptr);
+            SendMessageW(A.input, EM_SETCUEBANNER, TRUE, LPARAM((A.host.name() + L"한테 말하기 (Enter)").c_str()));
             SendMessageW(A.input, EM_LIMITTEXT, 2000, 0);
             ApplyFont(GetDpiForWindow(h));
             Layout();
             return 0;
         }
+        case WM_NCCALCSIZE:
+            if (w) return 0;  // 테두리·제목 표시줄 없이 전부 직접 그림
+            break;
+        case WM_NCHITTEST: {
+            POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+            ScreenToClient(h, &p);
+            RECT rc;
+            GetClientRect(h, &rc);
+            int b = Dip(6);
+            bool L = p.x < b, R = p.x >= rc.right - b, T = p.y < b, B = p.y >= rc.bottom - b;
+            if (T && L) return HTTOPLEFT;
+            if (T && R) return HTTOPRIGHT;
+            if (B && L) return HTBOTTOMLEFT;
+            if (B && R) return HTBOTTOMRIGHT;
+            if (L) return HTLEFT;
+            if (R) return HTRIGHT;
+            if (T) return HTTOP;
+            if (B) return HTBOTTOM;
+            if (PtInRect(&A.closeRc, p)) return HTCLIENT;
+            if (p.y < A.headerH) return HTCAPTION;
+            return HTCLIENT;
+        }
+        case WM_GETMINMAXINFO: {
+            auto* mm = reinterpret_cast<MINMAXINFO*>(l);
+            UINT dpi = GetDpiForWindow(h);
+            mm->ptMinTrackSize = {MulDiv(360, int(dpi), 96), MulDiv(280, int(dpi), 96)};
+            return 0;
+        }
+        case WM_ERASEBKGND: return 1;
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC dc = BeginPaint(h, &ps);
+            ChatUi::PaintChat(h, dc, Title(), A.headerH, A.pillRc, A.closeRc, A.closeHot);
+            EndPaint(h, &ps);
+            return 0;
+        }
+        case WM_MOUSEMOVE: {
+            POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+            bool hot = PtInRect(&A.closeRc, p) != FALSE;
+            if (hot != A.closeHot) {
+                A.closeHot = hot;
+                InvalidateRect(h, &A.closeRc, FALSE);
+                TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, h, 0};
+                TrackMouseEvent(&tme);
+            }
+            return 0;
+        }
+        case WM_MOUSELEAVE:
+            if (A.closeHot) { A.closeHot = false; InvalidateRect(h, &A.closeRc, FALSE); }
+            return 0;
+        case WM_LBUTTONUP: {
+            POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+            if (PtInRect(&A.closeRc, p)) ShowWindow(h, SW_HIDE);
+            return 0;
+        }
+        case WM_DRAWITEM: {
+            auto* d = reinterpret_cast<DRAWITEMSTRUCT*>(l);
+            COLORREF c = d->CtlID == IDOK ? ChatUi::kSendColor : d->CtlID == IDC_NEW ? ChatUi::kNewColor : ChatUi::kKeyColor;
+            ChatUi::DrawButton(d, c);
+            return TRUE;
+        }
+        case WM_CTLCOLOREDIT:
+            if (HWND(l) == A.input) {
+                static HBRUSH white = CreateSolidBrush(RGB(255, 255, 255));
+                SetBkColor(HDC(w), RGB(255, 255, 255));
+                SetTextColor(HDC(w), RGB(74, 58, 64));
+                return LRESULT(white);
+            }
+            break;
+        case WM_SETTEXT: {
+            LRESULT r = DefWindowProcW(h, m, w, l);
+            RECT hr{0, 0, 10000, A.headerH};
+            InvalidateRect(h, &hr, FALSE);
+            return r;
+        }
+        case ChatUi::kMsgCharChanged:
+            SendMessageW(A.input, EM_SETCUEBANNER, TRUE, LPARAM((A.host.name() + L"한테 말하기 (Enter)").c_str()));
+            SetWindowTextW(h, Title().c_str());
+            return 0;
         case WM_SIZE: Layout(); return 0;
         case WM_DPICHANGED: {
             ApplyFont(HIWORD(w));
@@ -577,12 +666,6 @@ LRESULT CALLBACK ChatProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case WM_ACTIVATE:
             if (LOWORD(w) != WA_INACTIVE) SetFocus(A.input);
             return 0;
-        case WM_CTLCOLORSTATIC:
-            if (HWND(l) == A.log) {
-                SetBkColor(HDC(w), GetSysColor(COLOR_WINDOW));
-                return LRESULT(GetSysColorBrush(COLOR_WINDOW));
-            }
-            break;
         case WM_COMMAND:
             switch (LOWORD(w)) {
                 case IDOK: SendFromInput(); return 0;
@@ -665,13 +748,15 @@ void Init(HINSTANCE inst, const AgentHost& host, const std::vector<std::string>&
     cc.hInstance = inst;
     cc.lpszClassName = kChatClass;
     cc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    cc.hbrBackground = GetSysColorBrush(COLOR_BTNFACE);
+    cc.style = CS_DROPSHADOW;
+    cc.hbrBackground = nullptr;
     cc.hIcon = HICON(SendMessageW(FindWindowW(L"UsagiDesktopPet.Msg", nullptr), WM_GETICON, ICON_SMALL, 0));
     RegisterClassExW(&cc);
     WNDCLASSEXW kc = cc;
     kc.lpfnWndProc = KeyProc;
     kc.lpszClassName = kKeyClass;
     RegisterClassExW(&kc);
+    ChatUi::Init(inst);
 }
 
 HWND ChatWindow() { return A.chat; }
@@ -685,16 +770,19 @@ void Open() {
         GetMonitorInfoW(mon, &mi);
         UINT dpi = 96, dy = 96;
         GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &dpi, &dy);
-        int w = MulDiv(440, int(dpi), 96), h = MulDiv(360, int(dpi), 96);
+        int w = MulDiv(460, int(dpi), 96), h = MulDiv(400, int(dpi), 96);
         RECT wr = mi.rcWork;
         // 우사기 옆에 (머리 위 말풍선과 겹치지 않게), 공간이 더 넓은 쪽으로
         int gap = MulDiv(170, int(dpi), 96);
         int x = (wr.right - p.x >= p.x - wr.left) ? int(p.x) + gap : int(p.x) - gap - w;
         x = std::clamp(x, int(wr.left), std::max(int(wr.left), int(wr.right) - w));
-        int y = std::max(int(wr.top), int(wr.bottom) - h - MulDiv(12, int(dpi), 96));
-        CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_CONTROLPARENT, kChatClass, L"우사기와 대화",
-                        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME, x, y, w, h, nullptr, nullptr, A.inst, nullptr);
+        int y = std::max(int(wr.top) + MulDiv(96, int(dpi), 96), int(wr.bottom) - h - MulDiv(12, int(dpi), 96));  // 위에 캐릭터들 앉을 자리
+        CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_CONTROLPARENT, kChatClass, Title().c_str(),
+                        WS_POPUP | WS_THICKFRAME | WS_CLIPCHILDREN, x, y, w, h, nullptr, nullptr, A.inst, nullptr);
         if (!A.chat) return;
+        ChatUi::RoundCorners(A.chat);
+        SetWindowPos(A.chat, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        ChatUi::AttachDeco(A.chat, [] { return A.host.charId(); }, [] { return A.busy; });
         NewChat();
     }
     BringToFront(A.chat);

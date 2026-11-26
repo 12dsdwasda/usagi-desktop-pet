@@ -15,6 +15,7 @@ add_executable(usagi_pet WIN32
   src/audio.cpp
   src/wintarget.cpp
   src/bubble.cpp
+  src/chatui.cpp
   src/voice.cpp
   src/gemini.cpp
   src/agent.cpp

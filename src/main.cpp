@@ -1328,6 +1328,7 @@ std::wstring SaveNoteFile(const std::wstring& text) {
 void InitAgent() {
     AgentHost h;
     h.name = [] { return std::wstring(CurChar().name); };
+    h.charId = [] { return std::wstring(CurChar().id); };
     h.persona = [] { return std::wstring(CurChar().persona); };
     h.say = [](const std::wstring& t, double sec) {
         std::wstring x = t.size() > 160 ? t.substr(0, 157) + L"…" : t;
