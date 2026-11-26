@@ -37,7 +37,7 @@ const wchar_t* kOverlayClass = L"UsagiDesktopPet.Overlay";
 enum MenuId : UINT {
     ID_TOGGLE_VIS = 100, ID_PAUSE, ID_MODE_DANCE, ID_MODE_RAP, ID_MODE_OFF, ID_CANCEL, ID_EXIT, ID_STATUS,
     ID_PRANK_OFF, ID_PRANK_SOMETIMES, ID_PRANK_OFTEN, ID_PRANK_NOW, ID_PRANK_NOTEPAD, ID_BUBBLES,
-    ID_VOICE_REC, ID_VOICE_TOGGLE, ID_CURSOR_TOGGLE, ID_CHAT, ID_GEMINI_KEY, ID_ANGRY_TOGGLE, ID_SING_TOGGLE,
+    ID_VOICE_REC, ID_VOICE_TOGGLE, ID_CURSOR_TOGGLE, ID_CHAT, ID_GEMINI_KEY, ID_ANGRY_TOGGLE, ID_SING_TOGGLE, ID_ROAM_TOGGLE,
     ID_CHAR_BASE = 900,
     ID_TARGET_BASE = 1000,
 };
@@ -99,6 +99,7 @@ struct Settings {
     bool cursorGrab = true;        // 마우스 포인터 가져가기
     double cursorIntervalSec = 10; // 포인터를 가져가는 간격(초, 지난번이 끝난 뒤부터)
     bool grabbable = true;         // 우사기를 꾹 눌러 잡고 옮기기
+    bool roam = true;              // 화면 어디든 돌아다니고, 놓은 자리에 안착 (false = 바닥만 걷고 놓으면 떨어짐)
     std::wstring agentModels = L"gemini-3-flash-preview,gemini-flash-latest,gemini-3.5-flash";
     bool chatHotkey = true;        // Ctrl+Alt+U 로 대화창
     bool angry = true;             // 여러 번 때리면 화내고 포인터를 던짐
@@ -184,7 +185,8 @@ struct App {
     int press = 0;                 // 0 없음, 1 눌렀음(아직 클릭인지 모름), 2 잡는 중
     POINT pressPt{}, hookPt{};
     double pressT = 0, lastHookEvent = 0, grabOffX = 0, grabOffY = 0, vx = 0, vy = 0;
-    double heldSideUntil = 0, heldT = 0;  // 들린 모습: 옆으로 끌려가는 포즈 유지 시각, 흔들림 시간
+    double heldSideUntil = 0, heldT = 0;
+    double roamX = 0, roamY = 0;  // 어디든 돌아다니기: 지금 걸어가는 목표점  // 들린 모습: 옆으로 끌려가는 포즈 유지 시각, 흔들림 시간
     struct Sample { double t, x, y; };
     std::vector<Sample> trail;     // 잡고 있는 동안 포인터 궤적 (던지는 속도 계산)
     int bounces = 0;
@@ -392,17 +394,37 @@ void StartIdle(double now) {
     SetState(State::Idle);
     g.stateUntil = now + Rand(1.5, 4.0);
 }
+void PickRoamTarget() {
+    const MonInfo& m = g.mon;
+    double le, re;
+    Extents(ANIM_WALK, false, g.s, le, re);
+    double bodyH = (g.sprites.baseY - g.sprites.meta[ANIM_WALK].top) * g.s;
+    double x0 = m.work.left + std::max(le, re), x1 = m.work.right - std::max(le, re);
+    double y0 = m.work.top + bodyH, y1 = Floor(m);
+    // 지금 자리에서 120~500 DIP 떨어진 아무 곳. 가끔은 바닥(작업 표시줄 위)으로
+    double r = Rand(120, 500) * m.scale, a = Rand(0, 6.283185);
+    g.roamX = std::clamp(g.px + std::cos(a) * r, std::min(x0, x1), std::max(x0, x1));
+    g.roamY = Rand(0, 1) < 0.2 ? y1 : std::clamp(g.py + std::sin(a) * r, std::min(y0, y1), y1);
+}
+
 void StartWalk(double now) {
     SetState(State::Walk);
     g.stateUntil = now + Rand(4.0, 12.0);
     if (Rand(0, 1) < 0.3) g.facing = -g.facing;
+    if (g.cfg.roam) { PickRoamTarget(); g.stateUntil = now + 25; }
 }
 
 // 기준점을 모니터 작업 영역 바닥으로 맞추고 좌우를 안쪽으로 제한. 가장자리면 true.
 bool ClampToFloor() {
     double le, re;
     Extents(g.anim, Flipped(), g.s, le, re);
-    g.py = Floor(g.mon);
+    if (g.cfg.roam) {  // 바닥에 붙이지 않고 작업 영역 안으로만
+        double bodyH = (g.sprites.baseY - g.sprites.meta[g.anim].top) * g.s;
+        double top = g.mon.work.top + bodyH, bot = Floor(g.mon);
+        g.py = std::clamp(g.py, std::min(top, bot), bot);
+    } else {
+        g.py = Floor(g.mon);
+    }
     double lo = g.mon.work.left + le, hi = g.mon.work.right - re;
     if (hi < lo) { g.px = (g.mon.work.left + g.mon.work.right) / 2.0; return false; }
     if (g.px <= lo) { g.px = lo; return true; }
@@ -731,7 +753,8 @@ void MaybeGrabCursor(double now, bool force, bool nearOnly = false) {
     bool isNear = CursorNearPet(c);
     if (!force) {
         if (nearOnly && !isNear) return;
-        if (!isNear && now < g.nextCursor) return;  // 가까우면 쿨타임 없이
+        // 가까우면 쿨타임 없이. 단 어디든 돌아다니기 중엔 화면 한가운데 있을 때가 많아서 항상 쿨타임을 지킨다
+        if ((!isNear || g.cfg.roam) && now < g.nextCursor) return;
         // 마우스를 쓰는 중이면 잠깐 멈출 때까지 기다림 (가까우면 더 짧게)
         if (now - g.cursorStillSince < (isNear ? 0.25 : 0.5)) return;
     }
@@ -873,6 +896,7 @@ void DropPet() {
     if (std::abs(g.vx) > 1) g.facing = g.vx > 0 ? 1 : -1;
     Log(L"held: 놓임 → %s (속도 %.0f, %.0f px/s)", g.thrown ? L"던짐" : L"떨어짐", g.vx, g.vy);
     if (g.thrown) Say(L"우라우라!", 1.2);
+    g.nextCursor = std::max(g.nextCursor, now + g.cfg.cursorIntervalSec);  // 내려놓자마자 포인터를 잡지 않게
     SetState(State::Fall);
 }
 
@@ -1010,6 +1034,40 @@ void TickHeld(double now, double dt) {
     Extents(g.anim, Flipped(), g.s, le, re);
     double bodyH = (g.sprites.baseY - am.top) * g.s;
     double floor = Floor(m);
+    if (g.cfg.roam) {
+        int n = std::max(1, int(std::ceil(std::hypot(g.vx, g.vy) * dt / (20 * m.scale))));
+        double h = dt / n, top = m.work.top + bodyH;
+        for (int i = 0; i < n; ++i) {
+            double k = std::pow(0.08, h);  // 바닥 마찰처럼 빠르게 느려짐
+            g.vx *= k;
+            g.vy *= k;
+            g.px += g.vx * h;
+            g.py += g.vy * h;
+            double midY = g.py - bodyH / 2;
+            if (g.px - le < m.work.left && g.vx < 0 && !MonitorFromPoint(POINT{LONG(m.work.left - 2), LONG(midY)}, MONITOR_DEFAULTTONULL)) {
+                g.px = m.work.left + le; g.vx = -g.vx * 0.6; g.facing = 1;
+            }
+            if (g.px + re > m.work.right && g.vx > 0 && !MonitorFromPoint(POINT{LONG(m.work.right + 1), LONG(midY)}, MONITOR_DEFAULTTONULL)) {
+                g.px = m.work.right - re; g.vx = -g.vx * 0.6; g.facing = -1;
+            }
+            if (g.py < top && g.vy < 0 && !MonitorFromPoint(POINT{LONG(g.px), LONG(m.work.top - 2)}, MONITOR_DEFAULTTONULL)) {
+                g.py = top; g.vy = -g.vy * 0.6;
+            }
+            if (g.py > floor && g.vy > 0 && !MonitorFromPoint(POINT{LONG(g.px), LONG(m.work.bottom + 1)}, MONITOR_DEFAULTTONULL)) {
+                g.py = floor; g.vy = -g.vy * 0.6;
+            }
+        }
+        if (std::hypot(g.vx, g.vy) < 80 * m.scale) {
+            g.mon = MonAt(g.px, g.py - 2);
+            ClampToFloor();
+            Log(L"held: 안착 (%.0f, %.0f)", g.px, g.py);
+            Say(g.thrown ? L"푸루야~" : L"푸루!");
+            g.thrown = false;
+            StartIdle(now);
+            g.stateUntil = now + Rand(5.0, 10.0);  // 놓인 자리에서 잠시 머문다
+        }
+        return;
+    }
     // 몇 단계로 나눠 움직여 빠르게 던져도 벽을 뚫지 않게
     int steps = std::max(1, int(std::ceil(std::hypot(g.vx, g.vy) * dt / (20 * m.scale))));
     double h = dt / steps;
@@ -1426,6 +1484,13 @@ void Tick() {
             if (!g.paused && (g.state == State::Walk || g.state == State::Idle)) MaybeGrabCursor(now, false);
             if (g.state != State::Walk && g.state != State::Idle) break;
             bool moving = g.state == State::Walk && !g.paused;
+            if (moving && g.cfg.roam) {  // 목표점까지 2D 로 걸어간다
+                bool arrived = WalkToward(g.roamX, g.roamY, g.cfg.walkSpeedDip * g.mon.scale, dt);
+                AdvanceDefault(dt);
+                ClampToFloor();
+                if (arrived || now > g.stateUntil) StartIdle(now);
+                break;
+            }
             if (moving) {
                 g.px += g.facing * g.cfg.walkSpeedDip * g.mon.scale * dt;
                 AdvanceDefault(dt);
@@ -1493,6 +1558,12 @@ void Tick() {
             TickAngry(now, dt);
             break;
         case State::Return: {
+            if (g.cfg.roam) {
+                ClampToFloor();
+                if (music) { SetState(State::Music, L"(복귀 후 음악)"); Say(g.cfg.mode == MODE_RAP ? L"우라우라!" : L"우라!"); }
+                else StartIdle(now);
+                break;
+            }
             SetAnim(ANIM_WALK);
             AdvanceDefault(dt);
             double fl = Floor(g.mon);
@@ -1599,6 +1670,17 @@ void CancelBusy() {
     else Release(L"사용자 취소", L"하아?");
 }
 
+// 어디든 돌아다니기 켜기/끄기 (끄면 바닥으로 돌아감)
+void SetRoam(bool on) {
+    g.cfg.roam = on;
+    WritePrivateProfileStringW(L"pet", L"roam", on ? L"1" : L"0", SettingsPath().c_str());
+    Log(L"roam: %s", on ? L"켬" : L"끔");
+    if (g.state == State::Walk || g.state == State::Idle) {
+        if (on) { Say(L"야하!"); StartWalk(NowSec()); }
+        else { Say(L"푸루!"); SetState(State::Return, L"(바닥으로)"); }
+    }
+}
+
 // 캐릭터 바꾸기: 스프라이트를 새로 읽고 설정 파일에 저장한다
 bool SwitchCharacter(const std::wstring& id) {
     SpriteSet ns;
@@ -1652,6 +1734,7 @@ void ShowTrayMenu() {
     }
     CheckMenuRadioItem(cm, ID_CHAR_BASE, ID_CHAR_BASE + kCharCount - 1, ID_CHAR_BASE + curChar, MF_BYCOMMAND);
     AppendMenuW(menu, MF_POPUP, UINT_PTR(cm), L"캐릭터 고르기");
+    AppendMenuW(menu, MF_STRING | (g.cfg.roam ? MF_CHECKED : 0), ID_ROAM_TOGGLE, L"화면 어디든 돌아다니기 (놓은 자리에 안착)");
     HMENU mm = CreatePopupMenu();
     AppendMenuW(mm, MF_STRING, ID_MODE_DANCE, L"춤");
     AppendMenuW(mm, MF_STRING, ID_MODE_RAP, L"랩");
@@ -1729,6 +1812,7 @@ void ShowTrayMenu() {
         case ID_PRANK_NOTEPAD: g.cfg.prankNotepad = !g.cfg.prankNotepad; break;
         case ID_PRANK_NOW: MaybePrank(NowSec(), true); break;
         case ID_BUBBLES: g.cfg.bubbles = !g.cfg.bubbles; break;
+        case ID_ROAM_TOGGLE: SetRoam(!g.cfg.roam); break;
         case ID_VOICE_TOGGLE: g.cfg.voice = !g.cfg.voice; break;
         case ID_SING_TOGGLE:
             g.cfg.sing = !g.cfg.sing;
@@ -1792,6 +1876,17 @@ void HandleCommand(const std::wstring& c) {
     else if (c == L"voice-refresh") g.voices.Refresh();
     else if (c == L"chat-open") Agent::Open();
     else if (auto ch = arg(L"character ")) SwitchCharacter(ch);
+    else if (auto fp = arg(L"fling ")) {  // fling x y vx vy (테스트용: 그 자리에서 이 속도로 던진 것처럼)
+        double x = 0, y = 0, vx = 0, vy = 0;
+        if (swscanf_s(fp, L"%lf %lf %lf %lf", &x, &y, &vx, &vy) == 4) {
+            g.px = x; g.py = y; g.vx = vx; g.vy = vy; g.bounces = 0;
+            g.thrown = std::hypot(vx, vy) > 600 * g.mon.scale;
+            UpdateScaleFor(x, y - 2);
+            SetState(State::Fall, L"(fling)");
+        }
+    }
+    else if (c == L"roam on") SetRoam(true);
+    else if (c == L"roam off") SetRoam(false);
     else if (c == L"angry") g.angryPending = true;
     else if (auto ct = arg(L"chat ")) { Agent::Open(); Agent::Submit(ct); }
     else if (auto p = arg(L"goto ")) {  // goto x y  (테스트용: 위치 지정)
@@ -1872,6 +1967,7 @@ void LoadSettings() {
     c.cursorGrab = IniInt(f, L"cursor", L"enabled", 1) != 0;
     c.grabbable = IniInt(f, L"pet", L"grabbable", 1) != 0;
     c.character = IniStr(f, L"pet", L"character", L"usagi");
+    c.roam = IniInt(f, L"pet", L"roam", 1) != 0;
     c.agentModels = IniStr(f, L"agent", L"models", c.agentModels.c_str());
     c.chatHotkey = IniInt(f, L"agent", L"hotkey", 1) != 0;
     c.angry = IniInt(f, L"angry", L"enabled", 1) != 0;
@@ -1919,6 +2015,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
         else if (a == L"--chat") cmds.push_back(L"chat " + next());
         else if (a == L"--chat-open") cmds.push_back(L"chat-open");
         else if (a == L"--character") cmds.push_back(L"character " + next());
+        else if (a == L"--roam") cmds.push_back(L"roam " + next());
+        else if (a == L"--fling") { std::wstring v = next(); for (int k = 0; k < 3; ++k) v += L" " + next(); cmds.push_back(L"fling " + v); }
         else if (a == L"--angry") cmds.push_back(L"angry");
         else if (a == L"--set-gemini-key" || a == L"--clear-gemini-key") {
             // 키는 이 프로세스에서 바로 암호화해 저장하고, 실행 중인 펫에는 보내지 않는다

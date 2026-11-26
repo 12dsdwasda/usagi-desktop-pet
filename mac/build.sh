@@ -2,7 +2,7 @@
 # 우사기 데스크톱 펫 macOS 빌드 (Xcode 명령줄 도구 필요). 결과: dist-mac/UsagiDesktopPet.app, dist-mac/UsagiDesktopPet-<ver>-mac.zip
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VER="${VER:-1.2.0}"
+VER="${VER:-1.3.0}"
 OUT=dist-mac
 APP="$OUT/UsagiDesktopPet.app"
 rm -rf "$OUT" build-mac

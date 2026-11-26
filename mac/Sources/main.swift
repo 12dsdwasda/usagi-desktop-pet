@@ -33,6 +33,7 @@ final class Settings {
     var blockSec: Double { min(10, max(0, d.object(forKey: "blockSec") == nil ? 5 : d.double(forKey: "blockSec"))) }
     var sizePt: CGFloat { CGFloat(min(512, max(48, d.object(forKey: "sizePt") == nil ? 140 : d.double(forKey: "sizePt")))) }
     var lyricsOffset: Double { d.double(forKey: "lyricsOffset") }
+    var roam: Bool { get { b("roam", true) } set { d.set(newValue, forKey: "roam") } }
     var character: String { get { d.string(forKey: "character") ?? "usagi" } set { d.set(newValue, forKey: "character") } }
 }
 
@@ -76,6 +77,7 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
     var vx: CGFloat = 0, vy: CGFloat = 0, bounces = 0, thrown = false
     var chatPendingAt = 0.0
     var heldT = 0.0, heldSideUntil = 0.0
+    var roamX: CGFloat = 0, roamY: CGFloat = 0  // 어디든 돌아다니기: 목표점
     // 화내기
     var tint: CGFloat = 0, shakeX: CGFloat = 0
     var throwFrom = NSPoint.zero, throwTo = NSPoint.zero, laughed = false
@@ -155,7 +157,14 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
         let a = area
         let (l, r) = extents()
         px = max(a.minX + l, min(px, a.maxX - r))
-        if state == .walk || state == .idle || state == .music { py = a.minY }
+        if state == .walk || state == .idle || state == .music {
+            if cfg.roam {  // 바닥에 붙이지 않고 화면 안으로만
+                let bodyH = (kBaseY - sprites.top[anim.rawValue]) * s
+                py = max(a.minY, min(py, a.maxY - bodyH))
+            } else {
+                py = a.minY
+            }
+        }
     }
 
     func setAnim(_ a: Anim) {
@@ -276,6 +285,7 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
         bounces = 0
         if abs(vx) > 1 { facing = vx > 0 ? 1 : -1 }
         if thrown { say("우라우라!", 1.2) }
+        nextCursor = max(nextCursor, now() + cfg.cursorInterval)  // 내려놓자마자 포인터를 잡지 않게
         setState(.fall)
     }
 
@@ -285,6 +295,34 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
         let a = area
         let (l, r) = extents()
         let bodyH = (kBaseY - sprites.top[anim.rawValue]) * s
+        if cfg.roam {  // 중력 없이 미끄러지다 멈춘 자리에 안착
+            let n = max(1, Int(ceil(hypot(vx, vy) * CGFloat(dt) / 20)))
+            let h = CGFloat(dt) / CGFloat(n)
+            for _ in 0..<n {
+                let k = pow(0.08, h)
+                vx *= k; vy *= k
+                px += vx * h; py += vy * h
+                let midY = py + bodyH / 2
+                if px - l < a.minX && vx < 0 && !NSScreen.screens.contains(where: { $0.frame.contains(NSPoint(x: a.minX - 2, y: midY)) }) {
+                    px = a.minX + l; vx = -vx * 0.6; facing = 1
+                }
+                if px + r > a.maxX && vx > 0 && !NSScreen.screens.contains(where: { $0.frame.contains(NSPoint(x: a.maxX + 2, y: midY)) }) {
+                    px = a.maxX - r; vx = -vx * 0.6; facing = -1
+                }
+                if py + bodyH > a.maxY && vy > 0 { py = a.maxY - bodyH; vy = -vy * 0.6 }
+                if py < a.minY && vy < 0 && !NSScreen.screens.contains(where: { $0.frame.contains(NSPoint(x: px, y: a.minY - 2)) }) {
+                    py = a.minY; vy = -vy * 0.6
+                }
+            }
+            if hypot(vx, vy) < 80 {
+                say(thrown ? "푸루야~" : "푸루!")
+                thrown = false
+                setState(.idle)
+                clampToScreen()
+                stateUntil = now() + rnd(5, 10)  // 놓인 자리에서 잠시 머문다
+            }
+            return
+        }
         let steps = max(1, Int(ceil(hypot(vx, vy) * CGFloat(dt) / 20)))
         let h = CGFloat(dt) / CGFloat(steps)
         for _ in 0..<steps {
@@ -408,6 +446,16 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
         setState(.walk)
         stateUntil = now() + rnd(4, 10)
         if Bool.random() { facing = -facing }
+        if cfg.roam {
+            // 지금 자리에서 120~500pt 떨어진 아무 곳. 가끔은 바닥(Dock 위)으로
+            let a = area
+            let (l, r) = extents()
+            let bodyH = (kBaseY - sprites.top[Anim.walk.rawValue]) * s
+            let d = CGFloat(rnd(120, 500)), ang = rnd(0, 6.283185)
+            roamX = max(a.minX + max(l, r), min(px + CGFloat(cos(ang)) * d, a.maxX - max(l, r)))
+            roamY = Double.random(in: 0...1) < 0.2 ? a.minY : max(a.minY, min(py + CGFloat(sin(ang)) * d, a.maxY - bodyH))
+            stateUntil = now() + 25
+        }
     }
 
     // ---------- 창 끌기 ----------
@@ -496,7 +544,8 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
         let c = NSEvent.mouseLocation
         let near = cursorNear(c)
         if nearOnly && !near { return }
-        if !force && !near && t < nextCursor { return }
+        // 어디든 돌아다니기 중엔 화면 한가운데 있을 때가 많아서 가까워도 쿨타임을 지킨다
+        if !force && (!near || cfg.roam) && t < nextCursor { return }
         if !force && t - cursorStillSince < (near ? 0.25 : 0.5) { return }
         let vf = screenFor(c).visibleFrame
         side = (vf.maxX - c.x >= c.x - vf.minX) ? 1 : -1
@@ -602,6 +651,12 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
             if state == .idle {
                 setAnim(.walk); frame = 0
                 if t > stateUntil { startWalk() }
+            } else if cfg.roam {
+                setAnim(.walk)
+                advance(dt)
+                let arrived = walkToward(roamX, roamY, 45, dt)
+                clampToScreen()
+                if arrived || t > stateUntil { setState(.idle); stateUntil = t + rnd(1.5, 4) }
             } else {
                 setAnim(.walk)
                 advance(dt)
@@ -714,6 +769,7 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
         let ci = NSMenuItem(title: "캐릭터 고르기", action: nil, keyEquivalent: "")
         ci.submenu = cm
         menu.addItem(ci)
+        menu.addItem(item("화면 어디든 돌아다니기 (놓은 자리에 안착)", #selector(mRoam), cfg.roam))
         let mm = NSMenu()
         for (k, n) in [("dance", "춤"), ("rap", "랩"), ("off", "끄기")] { mm.addItem(item(n, #selector(mMode(_:)), cfg.mode == k, k)) }
         let mi = NSMenuItem(title: "음악 모드", action: nil, keyEquivalent: "")
@@ -771,6 +827,13 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
         if let w = axMovableWindows(excludeFrontmost: false).first(where: { CFEqual($0.el, el) }), !busy { beginApproach(w) }
     }
     @objc func mChar(_ i: NSMenuItem) { if let k = i.representedObject as? String { switchCharacter(k) } }
+    @objc func mRoam() {
+        cfg.roam.toggle()
+        if state == .walk || state == .idle {
+            say(cfg.roam ? "야하!" : "푸루!")
+            if cfg.roam { startWalk() } else { vx = 0; vy = 0; thrown = false; bounces = 0; setState(.fall) }  // 끄면 바닥으로 떨어짐
+        }
+    }
     @objc func mBubbles() { cfg.bubbles.toggle() }
     @objc func mCursor() { cfg.cursorGrab.toggle(); nextCursor = now() + cfg.cursorInterval }
     @objc func mAngry() { cfg.angry.toggle() }
