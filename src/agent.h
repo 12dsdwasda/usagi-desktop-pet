@@ -14,6 +14,8 @@ struct AgentHost {
     std::function<std::wstring(const std::wstring& mode)> setMusicMode;
     std::function<std::wstring(const std::wstring& text)> writeNote;
     std::function<std::wstring(const std::wstring& action)> petAction;
+    std::function<std::wstring()> nowPlaying;                           // 스포티파이 지금 재생 중
+    std::function<std::wstring(const std::wstring& cmd)> spotifyControl;
 };
 
 namespace Agent {

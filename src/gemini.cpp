@@ -77,21 +77,20 @@ bool SaveGeminiKey(const std::string& raw) {
     return bool(f);
 }
 
-HttpResult HttpsPostJson(const wchar_t* host, const std::wstring& path, const std::string& apiKey, const std::string& body,
-                         int timeoutMs) {
+static HttpResult HttpsRequest(const wchar_t* method, const wchar_t* host, const std::wstring& path, std::wstring hdr,
+                               const std::string& body, int timeoutMs) {
     HttpResult r;
-    HINTERNET s = WinHttpOpen(L"UsagiDesktopPet/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
-                              WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!s)
-        s = WinHttpOpen(L"UsagiDesktopPet/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    const wchar_t* ua = L"UsagiDesktopPet/1.0 (https://github.com/12dsdwasda/usagi-desktop-pet)";
+    HINTERNET s = WinHttpOpen(ua, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!s) s = WinHttpOpen(ua, WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!s) { r.err = L"WinHTTP 초기화 실패"; return r; }
     WinHttpSetTimeouts(s, 10000, 10000, 15000, timeoutMs);
     HINTERNET c = WinHttpConnect(s, host, INTERNET_DEFAULT_HTTPS_PORT, 0);
-    HINTERNET q = c ? WinHttpOpenRequest(c, L"POST", path.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+    HINTERNET q = c ? WinHttpOpenRequest(c, method, path.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
                                          WINHTTP_FLAG_SECURE)
                     : nullptr;
-    std::wstring hdr = L"Content-Type: application/json; charset=utf-8\r\nx-goog-api-key: " + FromUtf8(apiKey) + L"\r\n";
-    bool ok = q && WinHttpSendRequest(q, hdr.c_str(), DWORD(-1), const_cast<char*>(body.data()), DWORD(body.size()),
+    bool ok = q && WinHttpSendRequest(q, hdr.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : hdr.c_str(), hdr.empty() ? 0 : DWORD(-1),
+                                      body.empty() ? WINHTTP_NO_REQUEST_DATA : const_cast<char*>(body.data()), DWORD(body.size()),
                                       DWORD(body.size()), 0) &&
               WinHttpReceiveResponse(q, nullptr);
     SecureZeroMemory(hdr.data(), hdr.size() * sizeof(wchar_t));
@@ -117,4 +116,25 @@ HttpResult HttpsPostJson(const wchar_t* host, const std::wstring& path, const st
     if (c) WinHttpCloseHandle(c);
     WinHttpCloseHandle(s);
     return r;
+}
+
+HttpResult HttpsPostJson(const wchar_t* host, const std::wstring& path, const std::string& apiKey, const std::string& body,
+                         int timeoutMs) {
+    std::wstring hdr = L"Content-Type: application/json; charset=utf-8\r\nx-goog-api-key: " + FromUtf8(apiKey) + L"\r\n";
+    HttpResult r = HttpsRequest(L"POST", host, path, hdr, body, timeoutMs);
+    SecureZeroMemory(hdr.data(), hdr.size() * sizeof(wchar_t));
+    return r;
+}
+
+HttpResult HttpsGet(const wchar_t* host, const std::wstring& pathAndQuery, int timeoutMs) {
+    return HttpsRequest(L"GET", host, pathAndQuery, L"", "", timeoutMs);
+}
+
+std::wstring UrlEncodeQ(const std::wstring& w) {
+    std::string s = ToUtf8(w), o;
+    for (unsigned char ch : s) {
+        if (isalnum(ch) || ch == '-' || ch == '_' || ch == '.' || ch == '~') o += char(ch);
+        else { char b[4]; snprintf(b, sizeof b, "%%%02X", ch); o += b; }
+    }
+    return FromUtf8(o);
 }

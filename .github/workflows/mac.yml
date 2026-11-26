@@ -1,0 +1,27 @@
+name: mac build
+
+on:
+  push:
+    paths: ["mac/**", "assets/sprites/**", ".github/workflows/mac.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: bash mac/build.sh
+      - name: Smoke test (실행 후 화면 캡처)
+        run: |
+          open dist-mac/UsagiDesktopPet.app
+          sleep 8
+          pgrep -x UsagiDesktopPet
+          screencapture -x dist-mac/screenshot.png || true
+          pkill -x UsagiDesktopPet || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: usagi-mac
+          path: |
+            dist-mac/*.zip
+            dist-mac/screenshot.png

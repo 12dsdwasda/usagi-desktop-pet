@@ -18,3 +18,6 @@ struct HttpResult {
 // HTTPS POST (JSON). 작업 스레드에서 호출한다 (블로킹).
 HttpResult HttpsPostJson(const wchar_t* host, const std::wstring& path, const std::string& apiKey, const std::string& body,
                          int timeoutMs);
+HttpResult HttpsGet(const wchar_t* host, const std::wstring& pathAndQuery, int timeoutMs);
+// URL 쿼리 값 인코딩 (UTF-8 퍼센트 인코딩, 공백은 %20)
+std::wstring UrlEncodeQ(const std::wstring& w);

@@ -3,3 +3,5 @@ dist/
 *.log
 *.tmp
 __pycache__/
+build-mac/
+dist-mac/

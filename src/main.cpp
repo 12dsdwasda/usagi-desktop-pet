@@ -8,6 +8,8 @@
 #include "agent.h"
 #include "gemini.h"
 #include "fire.h"
+#include "media.h"
+#include "lyrics.h"
 #include <shellapi.h>
 #include <shlobj.h>
 #include <objidl.h>
@@ -35,7 +37,7 @@ const wchar_t* kOverlayClass = L"UsagiDesktopPet.Overlay";
 enum MenuId : UINT {
     ID_TOGGLE_VIS = 100, ID_PAUSE, ID_MODE_DANCE, ID_MODE_RAP, ID_MODE_OFF, ID_CANCEL, ID_EXIT, ID_STATUS,
     ID_PRANK_OFF, ID_PRANK_SOMETIMES, ID_PRANK_OFTEN, ID_PRANK_NOW, ID_PRANK_NOTEPAD, ID_BUBBLES,
-    ID_VOICE_REC, ID_VOICE_TOGGLE, ID_CURSOR_TOGGLE, ID_CHAT, ID_GEMINI_KEY, ID_ANGRY_TOGGLE,
+    ID_VOICE_REC, ID_VOICE_TOGGLE, ID_CURSOR_TOGGLE, ID_CHAT, ID_GEMINI_KEY, ID_ANGRY_TOGGLE, ID_SING_TOGGLE,
     ID_TARGET_BASE = 1000,
 };
 
@@ -88,6 +90,9 @@ struct Settings {
     bool angry = true;             // 여러 번 때리면 화내고 포인터를 던짐
     int angryHits = 3;             // 화내기까지 빠르게 때리는 횟수
     double blockSec = 5;           // 던진 뒤 마우스·키보드가 안 먹는 시간 (최대 10초)
+    bool sing = true;              // 스포티파이 곡 가사를 말풍선으로 따라 부르기
+    bool singSpotifyOnly = true;   // false 면 다른 미디어 앱(브라우저 등)도
+    double lyricsOffsetSec = 0;    // 가사 타이밍 보정 (+면 늦게)
 };
 
 struct MonInfo {
@@ -184,6 +189,14 @@ struct App {
     long blocked = 0;              // 막은 입력 수 (로그)
     HHOOK keyHook{};
     Fire fire;
+    // 스포티파이 따라 부르기
+    MediaWatcher media;
+    LyricsFetcher lyrics;
+    MediaSnapshot song;
+    std::shared_ptr<const LyricsEntry> songLyrics;
+    std::wstring songKey;
+    int lyricIdx = -1;
+    bool singing = false;
     bool autoDrag = false, saidUraura = false, sleeping = false, wasPlaying = false;
     double nextPrank = 0, lastSnore = 0, lastFood = -1000;
     HWND lastFoodWnd{};
@@ -1110,6 +1123,57 @@ void TickAngry(double now, double dt) {
     }
 }
 
+// ---------- 스포티파이 따라 부르기 ----------
+std::wstring FmtTime(double s) {
+    wchar_t b[16];
+    int t = int(std::max(0.0, s));
+    swprintf_s(b, L"%d:%02d", t / 60, t % 60);
+    return b;
+}
+
+// 매 틱: 곡이 바뀌면 가사를 받고, 재생 위치에 맞는 줄을 말풍선으로
+void TickSing(double now) {
+    g.song = g.media.Get();
+    const MediaSnapshot& m = g.song;
+    std::wstring key = m.ok && !m.title.empty() ? m.artist + L"\n" + m.title : L"";
+    if (key != g.songKey) {
+        g.songKey = key;
+        g.lyricIdx = -1;
+        g.songLyrics = nullptr;
+        if (!key.empty() && g.cfg.sing) {
+            g.songLyrics = g.lyrics.Get(m.title, m.artist, m.album, m.duration);
+            Log(L"sing: 곡 바뀜 '%s' - %s (%s)", m.title.c_str(), m.artist.c_str(), FmtTime(m.duration).c_str());
+            if (m.playing && g.cfg.bubbles) g.bubble.Say(L"♪ " + m.title, 2.5);
+        }
+    }
+    bool ready = g.songLyrics && g.songLyrics->status == LyricsEntry::Ready;
+    g.singing = g.cfg.sing && m.ok && m.playing && ready && !g.paused;
+    if (!g.singing) return;
+    const auto& L = g.songLyrics->lines;
+    double pos = m.PositionAt(now) - g.cfg.lyricsOffsetSec;
+    int idx = -1;
+    for (int i = 0; i < int(L.size()) && L[i].t <= pos; ++i) idx = i;
+    if (idx == g.lyricIdx) return;
+    g.lyricIdx = idx;
+    if (idx < 0 || L[idx].text.empty()) return;  // 전주·간주
+    double next = idx + 1 < int(L.size()) ? L[idx + 1].t : L[idx].t + 5;
+    double dur = std::clamp(next - pos - 0.05, 1.0, 7.0);
+    if (g.cfg.bubbles && g.state == State::Music) g.bubble.Say(L"♪ " + L[idx].text, dur);
+}
+
+std::wstring NowPlayingText() {
+    const MediaSnapshot& m = g.song;
+    if (!m.ok) return L"스포티파이가 꺼져 있거나 재생 중인 곡이 없음";
+    std::wstring s = (m.playing ? L"재생 중: " : L"멈춤: ") + m.title + L" — " + m.artist;
+    if (!m.album.empty()) s += L" (앨범 " + m.album + L")";
+    s += L", " + FmtTime(m.PositionAt(NowSec())) + L" / " + FmtTime(m.duration);
+    if (!m.spotify) s += L", 앱: " + m.app;
+    if (!g.cfg.sing) s += L", 따라 부르기 꺼짐";
+    else if (!g.songLyrics || g.songLyrics->status == LyricsEntry::Pending) s += L", 가사 찾는 중";
+    else s += g.songLyrics->status == LyricsEntry::Ready ? L", 가사 있음 → 우사기가 따라 부름" : L", 맞는 가사를 못 찾음 (춤만 춤)";
+    return s;
+}
+
 // ---------- 에이전트(Gemini) 연결 ----------
 std::wstring Lower(std::wstring s) {
     CharLowerBuffW(s.data(), DWORD(s.size()));
@@ -1217,6 +1281,19 @@ void InitAgent() {
         }
         return SaveNoteFile(text);
     };
+    h.nowPlaying = []() { return NowPlayingText(); };
+    h.spotifyControl = [](const std::wstring& c) -> std::wstring {
+        if (c != L"play" && c != L"pause" && c != L"play_pause" && c != L"next" && c != L"previous") return L"오류:모르는 동작";
+        if (!g.song.ok) {
+            if (c == L"play" || c == L"play_pause") {
+                ShellExecuteW(nullptr, L"open", L"spotify:", nullptr, nullptr, SW_SHOWNORMAL);
+                return L"스포티파이를 열었음. 아직 재생 세션이 없어서 사용자가 재생을 눌러야 할 수 있음";
+            }
+            return L"오류:스포티파이 재생 세션이 없음";
+        }
+        g.media.Command(c);
+        return L"보냄: " + c;
+    };
     h.petAction = [](const std::wstring& a) -> std::wstring {
         if (a == L"cancel") { if (Busy()) CancelBusy(); return L"멈췄음"; }
         if (Busy()) return L"다른 일을 하는 중이라 못 함";
@@ -1246,7 +1323,9 @@ void Tick() {
     }
     g.lastTick = now;
     g.snd = g.audio.Running() ? g.audio.Get() : AudioSnapshot{};
-    bool music = g.cfg.mode != MODE_OFF && g.snd.playing;
+    TickSing(now);
+    // 소리가 감지되거나, 스포티파이 곡을 따라 부를 수 있으면 음악 상태
+    bool music = (g.cfg.mode != MODE_OFF && g.snd.playing) || g.singing;
 
     UpdateScaleFor(g.px, g.py - 2);  // 기준점이 있는 모니터의 DPI·작업 영역
     g.shakeX = 0;
@@ -1322,7 +1401,7 @@ void Tick() {
                 StartWalk(now);
                 break;
             }
-            SetAnim(g.cfg.mode == MODE_RAP ? ANIM_RAP : ANIM_DANCE);
+            SetAnim(g.singing || g.cfg.mode == MODE_RAP ? ANIM_RAP : ANIM_DANCE);  // 노래할 땐 랩 동작
             AdvanceMusic(dt, now);
             ClampToFloor();
             if (!g.paused) MaybeGrabCursor(now, false, true);  // 춤추다가도 포인터가 가까이 오면 잡음
@@ -1527,6 +1606,7 @@ void ShowTrayMenu() {
     wchar_t at[96];
     swprintf_s(at, L"때리면 화내기 (포인터 던짐, %g초 입력 막힘)", g.cfg.blockSec);
     AppendMenuW(menu, MF_STRING | (g.cfg.angry ? MF_CHECKED : 0), ID_ANGRY_TOGGLE, at);
+    AppendMenuW(menu, MF_STRING | (g.cfg.sing ? MF_CHECKED : 0), ID_SING_TOGGLE, L"스포티파이 노래 따라 부르기");
     AppendMenuW(menu, MF_STRING | (busy ? 0 : MF_GRAYED), ID_CANCEL, L"끌기·장난 취소");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     std::wstring st = L"소리 감지: ";
@@ -1534,6 +1614,12 @@ void ShowTrayMenu() {
     else if (!g.snd.deviceOk) st += L"출력 장치 연결 중…";
     else st += g.snd.playing ? (g.snd.beatLocked ? L"재생 중 (박자 맞춤)" : L"재생 중") : L"대기";
     AppendMenuW(menu, MF_STRING | MF_GRAYED, ID_STATUS, st.c_str());
+    if (g.song.ok) {
+        std::wstring np = L"♪ " + g.song.title + L" — " + g.song.artist;
+        if (np.size() > 60) np = np.substr(0, 57) + L"...";
+        np += g.singing ? L" (따라 부르는 중)" : (g.songLyrics && g.songLyrics->status == LyricsEntry::None ? L" (가사 없음)" : L"");
+        AppendMenuW(menu, MF_STRING | MF_GRAYED, ID_STATUS, EscapeMenu(np).c_str());
+    }
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, ID_EXIT, L"종료");
 
@@ -1558,6 +1644,10 @@ void ShowTrayMenu() {
         case ID_PRANK_NOW: MaybePrank(NowSec(), true); break;
         case ID_BUBBLES: g.cfg.bubbles = !g.cfg.bubbles; break;
         case ID_VOICE_TOGGLE: g.cfg.voice = !g.cfg.voice; break;
+        case ID_SING_TOGGLE:
+            g.cfg.sing = !g.cfg.sing;
+            g.songKey.clear();  // 다시 켜면 가사를 다시 확인
+            break;
         case ID_ANGRY_TOGGLE:
             g.cfg.angry = !g.cfg.angry;
             InstallMouseHook();
@@ -1696,6 +1786,9 @@ void LoadSettings() {
     c.agentModels = IniStr(f, L"agent", L"models", c.agentModels.c_str());
     c.chatHotkey = IniInt(f, L"agent", L"hotkey", 1) != 0;
     c.angry = IniInt(f, L"angry", L"enabled", 1) != 0;
+    c.sing = IniInt(f, L"sing", L"enabled", 1) != 0;
+    c.singSpotifyOnly = IniInt(f, L"sing", L"spotifyOnly", 1) != 0;
+    c.lyricsOffsetSec = std::clamp(IniDouble(f, L"sing", L"offsetSec", 0), -10.0, 10.0);
     c.angryHits = std::clamp(IniInt(f, L"angry", L"hits", 3), 3, 20);
     c.blockSec = std::clamp(IniDouble(f, L"angry", L"blockSec", 5), 0.0, 10.0);
     c.cursorIntervalSec = std::max(3.0, IniDouble(f, L"cursor", L"intervalSec", c.cursorIntervalSec));
@@ -1791,6 +1884,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     if (!g.msg || !g.overlay) return 1;
     g.bubble.Create(inst, kOverlayClass);
     g.fire.Create(inst, kOverlayClass);
+    g.media.Start(g.cfg.singSpotifyOnly);
     g.voices.Init();
     InitAgent();
     if (g.cfg.chatHotkey && !RegisterHotKey(g.msg, HOTKEY_CHAT, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'U'))
@@ -1824,6 +1918,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     }
     if (g.mouseHook) UnhookWindowsHookEx(g.mouseHook);
     SetKeyBlock(false);
+    g.media.Stop();
     g.audio.Stop();
     if (g.icon) DestroyIcon(g.icon);
     Gdiplus::GdiplusShutdown(gdipToken);

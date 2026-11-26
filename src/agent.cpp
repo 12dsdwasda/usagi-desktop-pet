@@ -57,6 +57,9 @@ const char* kTools = R"JSON([{"functionDeclarations":[
 {"name":"write_note","description":"메모장을 열어 우사기가 직접 글을 타이핑한다. 메모장이 이미 열려 있으면 문서 폴더에 텍스트 파일로 저장해 연다.","parameters":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}},
 {"name":"copy_to_clipboard","description":"텍스트를 클립보드에 복사한다.","parameters":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}},
 {"name":"read_clipboard","description":"클립보드의 텍스트를 읽는다. 사용자가 클립보드 내용을 보라고 분명히 요청했을 때만 쓴다.","parameters":{"type":"object","properties":{}}},
+{"name":"spotify_now_playing","description":"스포티파이에서 지금 재생 중인 곡, 가수, 재생 위치, 우사기가 따라 부를 가사가 있는지 알려준다.","parameters":{"type":"object","properties":{}}},
+{"name":"spotify_control","description":"스포티파이 재생 조절.","parameters":{"type":"object","properties":{"action":{"type":"string","enum":["play","pause","play_pause","next","previous"]}},"required":["action"]}},
+{"name":"spotify_search","description":"스포티파이 앱을 열고 이 검색어로 검색한다. 재생은 사용자가 결과에서 눌러야 한다 (자동 재생은 못 함).","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}},
 {"name":"pet_action","description":"우사기의 장난 동작. prank=창 끌기나 메모장 장난, grab_cursor=마우스 포인터 가져가기, cancel=하던 일 멈추기.","parameters":{"type":"object","properties":{"action":{"type":"string","enum":["prank","grab_cursor","cancel"]}},"required":["action"]}}
 ]}])JSON";
 
@@ -80,6 +83,8 @@ std::string SystemPrompt() {
         L"- 컴퓨터에서 할 일은 도구로 직접 해. 도구로 못 하는 일(파일 삭제, 설치, 결제, 로그인, 메일 보내기 등)은 못 한다고 솔직히 말해.\n"
         L"- 하지 않은 일을 했다고 말하지 마. 도구 결과에 오류가 있으면 그대로 알려.\n"
         L"- 웹 검색은 브라우저에 결과를 띄우는 것까지만 할 수 있다. 검색 결과 내용을 읽은 척하지 마.\n"
+        L"- 스포티파이에서 노래가 나오면 너(우사기)는 가사를 말풍선으로 따라 부른다. 노래를 불러 달라고 하면 스포티파이 상태를 보고, "
+        L"멈춰 있으면 재생하고, 원하는 곡이 있으면 스포티파이 검색을 열어 줘.\n"
         L"- 지금 시각: " + NowText() + L"\n";
     return ToUtf8(p);
 }
@@ -495,6 +500,17 @@ Json RunTool(const std::string& name, const Json& a) {
         return Ok(t);
     }
     if (name == "pet_action") return Ok(A.host.petAction(Arg(a, "action")));
+    if (name == "spotify_now_playing") return Ok(A.host.nowPlaying());
+    if (name == "spotify_control") {
+        std::wstring r = A.host.spotifyControl(Arg(a, "action"));
+        return r.rfind(L"오류:", 0) == 0 ? Err(r.substr(3)) : Ok(r);
+    }
+    if (name == "spotify_search") {
+        std::wstring q = Arg(a, "query");
+        if (q.empty()) return Err(L"검색어가 비어 있음");
+        return Shell(L"spotify:search:" + UrlEncodeQ(q)) ? Ok(L"스포티파이에서 검색 결과를 열었음. 사용자가 곡을 눌러 재생해야 함")
+                                                         : Err(L"스포티파이 앱을 열지 못함 (설치 안 됨?)");
+    }
     return Err(L"없는 도구");
 }
 

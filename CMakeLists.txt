@@ -19,12 +19,14 @@ add_executable(usagi_pet WIN32
   src/gemini.cpp
   src/agent.cpp
   src/fire.cpp
+  src/media.cpp
+  src/lyrics.cpp
   src/app.manifest
   src/resources.rc
 )
 target_compile_definitions(usagi_pet PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
 target_compile_options(usagi_pet PRIVATE /utf-8 /W4 /permissive- /wd4100)
-target_link_libraries(usagi_pet PRIVATE user32 gdi32 shell32 ole32 windowscodecs dwmapi shcore advapi32 gdiplus winmm winhttp crypt32)
+target_link_libraries(usagi_pet PRIVATE user32 gdi32 shell32 ole32 windowscodecs dwmapi shcore advapi32 gdiplus winmm winhttp crypt32 windowsapp)
 # 정적 CRT: 배포할 때 VC++ 재배포 패키지가 필요 없음
 set_property(TARGET usagi_pet PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
