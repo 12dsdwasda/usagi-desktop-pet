@@ -33,6 +33,7 @@ set_property(TARGET usagi_pet PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CO
 # 실행에 필요한 에셋을 EXE 옆으로 복사 (EXE 기준 상대 경로 assets\ 에서 읽음)
 add_custom_command(TARGET usagi_pet POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets/sprites $<TARGET_FILE_DIR:usagi_pet>/assets/sprites
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets/characters $<TARGET_FILE_DIR:usagi_pet>/assets/characters
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/assets/usagi.ini $<TARGET_FILE_DIR:usagi_pet>/assets/usagi.ini
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/settings.ini $<TARGET_FILE_DIR:usagi_pet>/settings.ini
 )

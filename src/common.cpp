@@ -75,6 +75,13 @@ std::wstring AssetsDir() {
     ExtractResource(IDR_SPRITE_DANCE, d + L"sprites\\dance.png", true);
     ExtractResource(IDR_SPRITE_RAP, d + L"sprites\\rap.png", true);
     ExtractResource(IDR_SPRITE_DRAG, d + L"sprites\\drag.png", true);
+    static const wchar_t* chars[] = {L"hachiware", L"chiikawa", L"rakko", L"shisa", L"momonga"};
+    static const wchar_t* files[] = {L"char.ini", L"walk.png", L"dance.png", L"rap.png", L"drag.png", L"held.png"};
+    for (int ci = 0; ci < 5; ++ci) {
+        std::wstring cd = d + L"characters\\" + chars[ci] + L"\\";
+        SHCreateDirectoryExW(nullptr, cd.c_str(), nullptr);
+        for (int k = 0; k < 6; ++k) ExtractResource(IDR_CHAR_BASE + ci * 10 + k, cd + files[k], true);
+    }
     return d;
 }
 

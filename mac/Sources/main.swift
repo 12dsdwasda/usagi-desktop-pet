@@ -33,6 +33,7 @@ final class Settings {
     var blockSec: Double { min(10, max(0, d.object(forKey: "blockSec") == nil ? 5 : d.double(forKey: "blockSec"))) }
     var sizePt: CGFloat { CGFloat(min(512, max(48, d.object(forKey: "sizePt") == nil ? 140 : d.double(forKey: "sizePt")))) }
     var lyricsOffset: Double { d.double(forKey: "lyricsOffset") }
+    var character: String { get { d.string(forKey: "character") ?? "usagi" } set { d.set(newValue, forKey: "character") } }
 }
 
 enum State: String {
@@ -74,6 +75,7 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
     var trail: [(t: Double, p: NSPoint)] = []
     var vx: CGFloat = 0, vy: CGFloat = 0, bounces = 0, thrown = false
     var chatPendingAt = 0.0
+    var heldT = 0.0, heldSideUntil = 0.0
     // 화내기
     var tint: CGFloat = 0, shakeX: CGFloat = 0
     var throwFrom = NSPoint.zero, throwTo = NSPoint.zero, laughed = false
@@ -84,7 +86,8 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
 
     // ---------- 시작 ----------
     func start() {
-        guard sprites.load() else {
+        if !sprites.load(character: cfg.character) { cfg.character = "usagi" }
+        guard !sprites.frames.isEmpty || sprites.load(character: "usagi") else {
             let a = NSAlert()
             a.messageText = "스프라이트를 불러오지 못했습니다."
             a.runModal()
@@ -161,7 +164,8 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
     func advance(_ dt: Double) {
         frameT += dt
         let d = kMeta[anim.rawValue].durations
-        while frameT >= d[frame] { frameT -= d[frame]; frame = (frame + 1) % 4 }
+        if frame >= d.count { frame = 0 }
+        while frameT >= d[frame] { frameT -= d[frame]; frame = (frame + 1) % d.count }
     }
 
     // 한 걸음씩 목표로. 도착하면 true
@@ -243,6 +247,8 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
         chatPendingAt = 0
         trail = []
         grabOff = NSPoint(x: px - pressPt.x, y: py - pressPt.y)
+        heldT = 0
+        heldSideUntil = 0
         say("하아? 하아?")
         setState(.held)
     }
@@ -624,6 +630,25 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
             tickFall(dt)
         case .chase, .cursorDrag:
             tickCursor(t, dt)
+        case .held where kHasHeld:
+            // 장갑(=포인터)에 매달린 모습. 빠르게 옆으로 끌면 옆으로 끌려가는 포즈
+            trailAdd(c)
+            var hv: CGFloat = 0
+            for smp in trail.reversed() where t - smp.t >= 0.04 {
+                hv = (c.x - smp.p.x) / CGFloat(max(0.04, t - smp.t))
+                if t - smp.t > 0.12 { break }
+            }
+            if abs(hv) > 700 { heldSideUntil = t + 0.3; facing = hv > 0 ? 1 : -1 }
+            setAnim(.held)
+            heldT += dt
+            let sub = Int(heldT * 1000 / 170) % 4
+            frame = (t < heldSideUntil && sprites.frames[Anim.held.rawValue].count >= 8 ? 4 : 0) + sub
+            let m = kMeta[Anim.held.rawValue]
+            let ax = flipped ? kFrame - m.anchorX : m.anchorX
+            let hx = flipped ? kFrame - kHoldX : kHoldX
+            px = c.x - (hx - ax) * s
+            py = c.y + (kHoldY - kBaseY) * s
+            if NSEvent.pressedMouseButtons & 1 == 0 { pressing = false; drop() }
         case .held:
             setAnim(.walk)
             advance(dt * 2.5)
@@ -645,11 +670,29 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
     // ---------- 메뉴 막대 ----------
     func setupStatusItem() {
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        let img = NSImage(cgImage: sprites.frames[0][0], size: NSSize(width: 22, height: 22))
-        status.button?.image = img
+        updateStatusIcon()
         let menu = NSMenu()
         menu.delegate = self
         status.menu = menu
+    }
+
+    func updateStatusIcon() {
+        status.button?.image = NSImage(cgImage: sprites.frames[0][0], size: NSSize(width: 22, height: 22))
+        status.button?.toolTip = curChar.name + " 데스크톱 펫"
+    }
+
+    var curChar: CharInfo { kChars.first { $0.id == cfg.character } ?? kChars[0] }
+
+    func switchCharacter(_ id: String) {
+        if [.held, .angry, .angryThrow].contains(state) { return }
+        if busy { _ = agentPetAction("cancel") }
+        guard sprites.load(character: id) else { NSLog("character: %@ 실패", id); return }
+        cfg.character = id
+        anim = .walk; frame = 0; frameT = 0
+        view.image = nil
+        updateStatusIcon()
+        NSLog("character: %@", id)
+        say(curChar.name + " 등장!", 2.2)
     }
 
     private func item(_ title: String, _ sel: Selector, _ on: Bool = false, _ obj: Any? = nil, enabled: Bool = true) -> NSMenuItem {
@@ -662,10 +705,15 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        menu.addItem(item("우사기와 대화… (⌃⌥U)", #selector(mChat)))
+        menu.addItem(item(curChar.name + "와 대화… (⌃⌥U)", #selector(mChat)))
         menu.addItem(.separator())
         menu.addItem(item(visible ? "캐릭터 숨기기" : "캐릭터 보이기", #selector(mToggleVis)))
         menu.addItem(item("이동 일시정지", #selector(mPause), paused))
+        let cm = NSMenu()
+        for c in kChars { cm.addItem(item(c.name, #selector(mChar(_:)), cfg.character == c.id, c.id)) }
+        let ci = NSMenuItem(title: "캐릭터 고르기", action: nil, keyEquivalent: "")
+        ci.submenu = cm
+        menu.addItem(ci)
         let mm = NSMenu()
         for (k, n) in [("dance", "춤"), ("rap", "랩"), ("off", "끄기")] { mm.addItem(item(n, #selector(mMode(_:)), cfg.mode == k, k)) }
         let mi = NSMenuItem(title: "음악 모드", action: nil, keyEquivalent: "")
@@ -722,6 +770,7 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
         let el = o as! AXUIElement
         if let w = axMovableWindows(excludeFrontmost: false).first(where: { CFEqual($0.el, el) }), !busy { beginApproach(w) }
     }
+    @objc func mChar(_ i: NSMenuItem) { if let k = i.representedObject as? String { switchCharacter(k) } }
     @objc func mBubbles() { cfg.bubbles.toggle() }
     @objc func mCursor() { cfg.cursorGrab.toggle(); nextCursor = now() + cfg.cursorInterval }
     @objc func mAngry() { cfg.angry.toggle() }
@@ -752,6 +801,8 @@ final class Pet: NSObject, NSMenuDelegate, AgentHost {
 
     // ---------- AgentHost ----------
     func agentSay(_ text: String, _ seconds: Double) { say(text.count > 160 ? String(text.prefix(157)) + "…" : text, seconds) }
+    func agentName() -> String { curChar.name }
+    func agentPersona() -> String { curChar.persona }
     func agentThinking(_ on: Bool) { if on && cfg.bubbles { bubble.say("음…", 60) } }
     func agentAnchor() -> NSPoint { headTop }
     func agentStatus() -> String {

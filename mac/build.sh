@@ -2,7 +2,7 @@
 # 우사기 데스크톱 펫 macOS 빌드 (Xcode 명령줄 도구 필요). 결과: dist-mac/UsagiDesktopPet.app, dist-mac/UsagiDesktopPet-<ver>-mac.zip
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VER="${VER:-1.1.0}"
+VER="${VER:-1.2.0}"
 OUT=dist-mac
 APP="$OUT/UsagiDesktopPet.app"
 rm -rf "$OUT" build-mac
@@ -14,6 +14,7 @@ done
 lipo -create build-mac/usagi-arm64 build-mac/usagi-x86_64 -output "$APP/Contents/MacOS/UsagiDesktopPet"
 
 cp assets/sprites/walk.png assets/sprites/dance.png assets/sprites/rap.png assets/sprites/drag.png "$APP/Contents/Resources/"
+cp -R assets/characters "$APP/Contents/Resources/characters"
 iconutil -c icns mac/icon.iconset -o "$APP/Contents/Resources/AppIcon.icns"
 
 cat > "$APP/Contents/Info.plist" <<EOF

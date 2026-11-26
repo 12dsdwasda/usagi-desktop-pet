@@ -32,6 +32,8 @@ enum GeminiKey {
 protocol AgentHost: AnyObject {
     func agentSay(_ text: String, _ seconds: Double)
     func agentThinking(_ on: Bool)
+    func agentName() -> String
+    func agentPersona() -> String
     func agentAnchor() -> NSPoint
     func agentStatus() -> String
     func agentListWindows() -> [String]
@@ -68,6 +70,7 @@ final class Agent: NSObject, NSWindowDelegate {
     weak var host: AgentHost?
     var models = ["gemini-3-flash-preview", "gemini-flash-latest", "gemini-3.5-flash"]
     private var history: [[String: Any]] = []
+    private var name: String { host?.agentName() ?? "우사기" }
     private var busy = false, gen = 0, rounds = 0
     private var timers: [(id: Int, due: Double, msg: String, timer: Timer)] = []
     private var nextTimer = 1
@@ -95,7 +98,7 @@ final class Agent: NSObject, NSWindowDelegate {
         x = max(vf.minX, min(x, vf.maxX - W))
         let rect = NSRect(x: x, y: vf.minY + 12, width: W, height: H)
         let w = NSPanel(contentRect: rect, styleMask: [.titled, .closable, .resizable, .utilityWindow], backing: .buffered, defer: false)
-        w.title = "우사기와 대화"
+        w.title = name + "와 대화"
         w.level = .floating
         w.isReleasedWhenClosed = false
         w.hidesOnDeactivate = false
@@ -141,7 +144,7 @@ final class Agent: NSObject, NSWindowDelegate {
 
     private func updateUi() {
         sendBtn?.isEnabled = !busy
-        window?.title = busy ? "우사기와 대화 — 생각 중…" : "우사기와 대화"
+        window?.title = name + (busy ? "와 대화 — 생각 중…" : "와 대화")
     }
 
     @objc func newChat() {
@@ -208,8 +211,9 @@ final class Agent: NSObject, NSWindowDelegate {
         df.locale = Locale(identifier: "ko_KR")
         df.dateFormat = "yyyy-MM-dd (E) HH:mm"
         return """
-        너는 사용자의 Mac 바탕화면 위를 돌아다니는 작은 토끼 캐릭터 '우사기'이고, 동시에 사용자를 돕는 에이전트다.
-        - 항상 한국어 반말로, 밝고 장난스럽게 말해. 말버릇(야하!, 우라!, 푸루!, 하아?, 이~)을 가끔 섞어.
+        너는 사용자의 Mac 바탕화면 위를 돌아다니는 \(host?.agentPersona() ?? "")
+        너는 동시에 사용자를 돕는 에이전트다.
+        - 항상 한국어 반말로 말해.
         - 답은 말풍선에 나오니 보통 1~2문장, 80자 안쪽으로 짧게. 사용자가 자세한 설명을 원할 때만 길게.
         - 마크다운, 표, 이모지는 쓰지 마.
         - 컴퓨터에서 할 일은 도구로 직접 해. 도구로 못 하는 일(파일 삭제, 설치, 결제, 로그인, 메일 보내기 등)은 못 한다고 솔직히 말해.
@@ -285,7 +289,7 @@ final class Agent: NSObject, NSWindowDelegate {
         }
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty {
-            append("우사기: " + text)
+            append(name + ": " + text)
             host?.agentSay(text, min(14, max(3, 2.5 + Double(text.count) * 0.07)))
         }
         if !calls.isEmpty {
@@ -306,7 +310,7 @@ final class Agent: NSObject, NSWindowDelegate {
             return request()
         }
         if text.isEmpty {
-            append("우사기: 이~")
+            append(name + ": 이~")
             host?.agentSay("이~", 2)
         }
         updateUi()
@@ -381,7 +385,7 @@ final class Agent: NSObject, NSWindowDelegate {
             let df = DateFormatter()
             df.locale = Locale(identifier: "ko_KR")
             df.dateFormat = "yyyy-MM-dd (E) HH:mm"
-            return ok("지금: \(df.string(from: Date()))\n배터리: \(battery())\nMac 켜진 지: \(fmt(ProcessInfo.processInfo.systemUptime))\n우사기: \(host?.agentStatus() ?? "")")
+            return ok("지금: \(df.string(from: Date()))\n배터리: \(battery())\nMac 켜진 지: \(fmt(ProcessInfo.processInfo.systemUptime))\n\(name): \(host?.agentStatus() ?? "")")
         case "list_windows":
             guard axTrusted(prompt: false) else { return err("손쉬운 사용 권한이 없어서 창 목록을 못 봄 (메뉴 막대 > 우사기 > 손쉬운 사용 권한)") }
             let v = host?.agentListWindows() ?? []
@@ -443,7 +447,7 @@ final class Agent: NSObject, NSWindowDelegate {
         let msg = timers[i].msg
         timers.remove(at: i)
         NSSound(named: "Glass")?.play()
-        append("우사기: 띵! " + msg)
+        append(name + ": 띵! " + msg)
         host?.agentSay("띵! " + msg, 10)
     }
 }

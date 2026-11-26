@@ -1,39 +1,93 @@
 import AppKit
 
 // ---------- 스프라이트 ----------
-enum Anim: Int { case walk = 0, dance, rap, drag }
+// held: 마우스(장갑)에 들린 모습. 0~3 위로 들려 흔들림, 4~7 옆으로 끌려감. 우사기는 없어서 걷기 그림을 쓴다.
+enum Anim: Int { case walk = 0, dance, rap, drag, held }
 
 struct AnimMeta {
-    let durations: [Double]
-    let anchorX: CGFloat
-    let left: CGFloat
-    let right: CGFloat
+    var durations: [Double]
+    var anchorX: CGFloat
+    var left: CGFloat
+    var right: CGFloat
 }
+
+// 고를 수 있는 캐릭터. persona 는 Gemini 에이전트에게 주는 소개·말투.
+struct CharInfo { let id: String; let name: String; let persona: String }
+let kChars: [CharInfo] = [
+    CharInfo(id: "usagi", name: "우사기", persona: "작은 토끼 캐릭터 '우사기'다. 밝고 장난스럽게 말하고, 말버릇(야하!, 우라!, 푸루!, 하아?, 이~)을 가끔 섞어."),
+    CharInfo(id: "hachiware", name: "하치와레", persona: "머리 위가 파란 고양이 캐릭터 '하치와레'다. 긍정적이고 다정하며 말을 잘한다. 친구를 응원하듯 말해."),
+    CharInfo(id: "chiikawa", name: "치이카와", persona: "작고 하얀 캐릭터 '치이카와'다. 수줍고 겁이 많지만 열심히 한다. 아주 짧게 말하고, 가끔 '와…', '흐에…' 같은 소리를 섞어."),
+    CharInfo(id: "rakko", name: "랏코", persona: "이마에 X 흉터가 있는 해달 캐릭터 '랏코'다. 아주 강한 토벌가답게 침착하고 듬직하게, 멋있게 말해."),
+    CharInfo(id: "shisa", name: "시사", persona: "사자 갈기가 있는 캐릭터 '시사'다. 성실하고 씩씩하며 열심히 일한다. 기운차게 말해."),
+    CharInfo(id: "momonga", name: "모몽가", persona: "파란 꼬리가 복슬복슬한 하늘다람쥐 캐릭터 '모몽가'다. 귀여운 척하며 응석 부리고 조금 제멋대로 말해."),
+]
 
 let kFrame: CGFloat = 384
 let kBaseY: CGFloat = 344  // 프레임 위에서부터 발바닥까지
-let kGripX: CGFloat = 178, kGripY: CGFloat = 274
-let kMeta: [AnimMeta] = [
+private let kUsagiMeta: [AnimMeta] = [
     AnimMeta(durations: [0.14, 0.11, 0.14, 0.11], anchorX: 188, left: 92, right: 291),
     AnimMeta(durations: [0.19, 0.13, 0.19, 0.13], anchorX: 192, left: 69, right: 315),
     AnimMeta(durations: [0.15, 0.10, 0.13, 0.11], anchorX: 183, left: 76, right: 307),
     AnimMeta(durations: [0.24, 0.15, 0.23, 0.16], anchorX: 265, left: 176, right: 365),
 ]
+// 지금 캐릭터의 값 (Sprites.load 가 바꾼다)
+var kMeta: [AnimMeta] = kUsagiMeta + [kUsagiMeta[0]]
+var kGripX: CGFloat = 178, kGripY: CGFloat = 274
+var kHasHeld = false
+var kHoldX: CGFloat = 192, kHoldY: CGFloat = 40
+
+// 아주 단순한 ini 읽기 (char.ini 는 ASCII)
+private func readIni(_ url: URL) -> [String: [String: String]] {
+    guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [:] }
+    var out: [String: [String: String]] = [:]
+    var sec = ""
+    for raw in text.components(separatedBy: .newlines) {
+        let l = raw.trimmingCharacters(in: .whitespaces)
+        if l.isEmpty || l.hasPrefix(";") { continue }
+        if l.hasPrefix("[") && l.hasSuffix("]") { sec = String(l.dropFirst().dropLast()); continue }
+        if let eq = l.firstIndex(of: "=") {
+            out[sec, default: [:]][String(l[..<eq])] = String(l[l.index(after: eq)...])
+        }
+    }
+    return out
+}
 
 final class Sprites {
     var frames: [[CGImage]] = []
     var alpha: [[[UInt8]]] = []  // 프레임별 알파 (행 0 = 위)
     var top: [CGFloat] = []      // 애니메이션별 몸 맨 위 행
 
-    func load() -> Bool {
-        for name in ["walk", "dance", "rap", "drag"] {
-            guard let url = Bundle.main.url(forResource: name, withExtension: "png"),
+    func load(character: String) -> Bool {
+        let usagi = character == "usagi"
+        let sub: String? = usagi ? nil : "characters/" + character
+        var meta = kUsagiMeta + [kUsagiMeta[0]]
+        var grip = (CGFloat(178), CGFloat(274)), hold = (CGFloat(192), CGFloat(40))
+        let hasHeld = !usagi && Bundle.main.url(forResource: "held", withExtension: "png", subdirectory: sub) != nil
+        if !usagi {
+            guard let iu = Bundle.main.url(forResource: "char", withExtension: "ini", subdirectory: sub) else { return false }
+            let ini = readIni(iu)
+            func f(_ s: String, _ k: String, _ d: CGFloat) -> CGFloat { CGFloat(Double(ini[s]?[k] ?? "") ?? Double(d)) }
+            for (i, n) in ["walk", "dance", "rap", "drag", "held"].enumerated() {
+                let durs = (ini[n]?["durations"] ?? "").split(separator: ",").compactMap { Double($0) }.map { $0 / 1000 }
+                if durs.isEmpty { continue }
+                meta[i] = AnimMeta(durations: durs, anchorX: f(n, "anchorX", 192), left: f(n, "left", 0), right: f(n, "right", kFrame))
+            }
+            grip = (f("drag", "gripX", 178), f("drag", "gripY", 274))
+            hold = (f("held", "holdX", 192), f("held", "holdY", 40))
+        }
+        var nf: [[CGImage]] = [], na: [[[UInt8]]] = [], nt: [CGFloat] = []
+        for name in ["walk", "dance", "rap", "drag", "held"] {
+            if name == "held" && !hasHeld {
+                nf.append(nf[0]); na.append(na[0]); nt.append(nt[0])
+                continue
+            }
+            guard let url = Bundle.main.url(forResource: name, withExtension: "png", subdirectory: sub),
                   let src = CGImageSourceCreateWithURL(url as CFURL, nil),
                   let sheet = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return false }
             var fs: [CGImage] = []
             var als: [[UInt8]] = []
             var minRow = Int(kFrame)
-            for i in 0..<4 {
+            for i in 0..<max(1, sheet.width / Int(kFrame)) {
                 guard let f = sheet.cropping(to: CGRect(x: CGFloat(i) * kFrame, y: 0, width: kFrame, height: kFrame)) else { return false }
                 fs.append(f)
                 let n = Int(kFrame)
@@ -49,10 +103,19 @@ final class Sprites {
                 }
                 als.append(buf)
             }
-            frames.append(fs)
-            alpha.append(als)
-            top.append(CGFloat(minRow))
+            nf.append(fs)
+            na.append(als)
+            nt.append(CGFloat(minRow))
         }
+        if !hasHeld { meta[Anim.held.rawValue] = meta[0] }
+        for i in meta.indices where meta[i].durations.count < nf[i].count {
+            meta[i].durations += Array(repeating: meta[i].durations.last ?? 0.15, count: nf[i].count - meta[i].durations.count)
+        }
+        frames = nf; alpha = na; top = nt
+        kMeta = meta
+        (kGripX, kGripY) = grip
+        (kHoldX, kHoldY) = hold
+        kHasHeld = hasHeld
         return true
     }
 }

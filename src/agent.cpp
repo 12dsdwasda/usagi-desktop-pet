@@ -76,14 +76,14 @@ std::wstring NowText() {
 
 std::string SystemPrompt() {
     std::wstring p =
-        L"너는 사용자의 Windows 바탕화면 위를 돌아다니는 작은 토끼 캐릭터 '우사기'이고, 동시에 사용자를 돕는 에이전트다.\n"
-        L"- 항상 한국어 반말로, 밝고 장난스럽게 말해. 말버릇(야하!, 우라!, 푸루!, 하아?, 이~)을 가끔 섞어.\n"
+        L"너는 사용자의 Windows 바탕화면 위를 돌아다니는 " + A.host.persona() + L"\n너는 동시에 사용자를 돕는 에이전트다.\n"
+        L"- 항상 한국어 반말로 말해.\n"
         L"- 답은 말풍선에 나오니 보통 1~2문장, 80자 안쪽으로 짧게. 사용자가 자세한 설명을 원할 때만 길게.\n"
         L"- 마크다운, 표, 이모지는 쓰지 마. 말풍선에 그대로 보인다.\n"
         L"- 컴퓨터에서 할 일은 도구로 직접 해. 도구로 못 하는 일(파일 삭제, 설치, 결제, 로그인, 메일 보내기 등)은 못 한다고 솔직히 말해.\n"
         L"- 하지 않은 일을 했다고 말하지 마. 도구 결과에 오류가 있으면 그대로 알려.\n"
         L"- 웹 검색은 브라우저에 결과를 띄우는 것까지만 할 수 있다. 검색 결과 내용을 읽은 척하지 마.\n"
-        L"- 스포티파이에서 노래가 나오면 너(우사기)는 가사를 말풍선으로 따라 부른다. 노래를 불러 달라고 하면 스포티파이 상태를 보고, "
+        L"- 스포티파이에서 노래가 나오면 너는 가사를 말풍선으로 따라 부른다. 노래를 불러 달라고 하면 스포티파이 상태를 보고, "
         L"멈춰 있으면 재생하고, 원하는 곡이 있으면 스포티파이 검색을 열어 줘.\n"
         L"- 지금 시각: " + NowText() + L"\n";
     return ToUtf8(p);
@@ -129,7 +129,7 @@ void Append(const std::wstring& line) {
 void UpdateUi() {
     if (!A.chat) return;
     EnableWindow(A.sendBtn, !A.busy);
-    SetWindowTextW(A.chat, A.busy ? L"우사기와 대화 — 생각 중…" : L"우사기와 대화");
+    SetWindowTextW(A.chat, (A.host.name() + (A.busy ? L"와 대화 — 생각 중…" : L"와 대화")).c_str());
 }
 
 int Dip(int v) { return MulDiv(v, int(A.fontDpi ? A.fontDpi : 96), 96); }
@@ -306,7 +306,7 @@ void OnResult(std::unique_ptr<AsyncResult> r) {
     }
     while (!text.empty() && iswspace(text.back())) text.pop_back();
     if (!text.empty()) {
-        Append(L"우사기: " + text);
+        Append(A.host.name() + L": " + text);
         A.host.say(text, std::clamp(2.5 + text.size() * 0.07, 3.0, 14.0));
     }
     if (!calls.empty()) {
@@ -338,7 +338,7 @@ void OnResult(std::unique_ptr<AsyncResult> r) {
         return;
     }
     if (text.empty()) {
-        Append(L"우사기: 이~");
+        Append(A.host.name() + L": 이~");
         A.host.say(L"이~", 2);
     }
     UpdateUi();
@@ -439,7 +439,7 @@ Json RunTool(const std::string& name, const Json& a) {
         MEMORYSTATUSEX ms{sizeof(ms)};
         if (GlobalMemoryStatusEx(&ms)) s += L"\n메모리 사용률: " + std::to_wstring(ms.dwMemoryLoad) + L"%";
         s += L"\nPC 켜진 지: " + FmtDuration(GetTickCount64() / 1000.0);
-        s += L"\n우사기: " + A.host.status();
+        s += L"\n" + A.host.name() + L": " + A.host.status();
         return Ok(s);
     }
     if (name == "list_windows") {
@@ -523,7 +523,7 @@ void FireTimer(UINT_PTR id) {
     g_timerDue.erase(id);
     Log(L"agent: 타이머 울림");
     MessageBeep(MB_ICONASTERISK);
-    Append(L"우사기: 띵! " + msg);
+    Append(A.host.name() + L": 띵! " + msg);
     A.host.say(L"띵! " + msg, 10);
 }
 

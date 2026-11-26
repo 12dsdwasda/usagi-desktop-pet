@@ -14,6 +14,7 @@ jobs:
         run: bash mac/build.sh
       - name: Smoke test (실행 후 화면 캡처)
         run: |
+          defaults write io.github.12dsdwasda.usagi-desktop-pet character hachiware
           open dist-mac/UsagiDesktopPet.app
           sleep 8
           pgrep -x UsagiDesktopPet

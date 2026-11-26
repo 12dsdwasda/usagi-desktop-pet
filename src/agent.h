@@ -16,6 +16,8 @@ struct AgentHost {
     std::function<std::wstring(const std::wstring& action)> petAction;
     std::function<std::wstring()> nowPlaying;                           // 스포티파이 지금 재생 중
     std::function<std::wstring(const std::wstring& cmd)> spotifyControl;
+    std::function<std::wstring()> name;     // 지금 캐릭터 이름 (예: 우사기)
+    std::function<std::wstring()> persona;  // "작은 토끼 캐릭터 '우사기'. 말버릇 …" 같은 소개와 말투
 };
 
 namespace Agent {

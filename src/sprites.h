@@ -8,7 +8,8 @@ struct Bitmap {
     std::vector<uint32_t> px;
 };
 
-enum AnimId { ANIM_WALK = 0, ANIM_DANCE, ANIM_RAP, ANIM_DRAG, ANIM_COUNT };
+// HELD: 마우스(장갑)에 들린 모습. 0~3 위로 들려 흔들림, 4~7 옆으로 끌려감. 없는 캐릭터는 WALK 를 쓴다.
+enum AnimId { ANIM_WALK = 0, ANIM_DANCE, ANIM_RAP, ANIM_DRAG, ANIM_HELD, ANIM_COUNT };
 
 struct AnimMeta {
     std::vector<int> durationsMs;  // 프레임별 기본 재생 시간
@@ -20,16 +21,20 @@ struct AnimMeta {
 struct SpriteSet {
     int frameW = 384, frameH = 384, baseY = 344;
     int gripX = 178, gripY = 274;  // drag 스프라이트에서 손이 창 가장자리에 닿는 점
+    bool hasHeld = false;          // held.png 가 있음 (장갑에 들린 모습)
+    int holdX = 192, holdY = 40;   // held 스프라이트에서 장갑 = 마우스 포인터 위치
     std::array<AnimMeta, ANIM_COUNT> meta;
     std::array<std::vector<Bitmap>, ANIM_COUNT> frames;  // 원본 해상도
 
-    bool Load(const std::wstring& assetsDir, std::wstring& err);
+    // character: "usagi" = assets\usagi.ini + sprites\*.png, 그 밖 = assets\characters\<id>\char.ini + *.png
+    bool Load(const std::wstring& assetsDir, const std::wstring& character, std::wstring& err);
 };
 
 // 크기를 바꾼 프레임 캐시 (DPI 바뀔 때만 다시 만듦)
 class ScaledCache {
 public:
     const Bitmap& Get(const SpriteSet& s, int anim, int frame, bool flip, int sizePx);
+    void Reset() { sizePx_ = 0; for (auto& v : cache_) v.clear(); }
 private:
     int sizePx_ = 0;
     std::array<std::vector<Bitmap>, ANIM_COUNT * 2> cache_;

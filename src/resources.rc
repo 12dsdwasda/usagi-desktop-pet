@@ -8,10 +8,40 @@ IDR_SPRITE_RAP   RCDATA "../assets/sprites/rap.png"
 IDR_SPRITE_DRAG  RCDATA "../assets/sprites/drag.png"
 IDR_USAGI_INI    RCDATA "../assets/usagi.ini"
 IDR_SETTINGS_INI RCDATA "../settings.ini"
+300 RCDATA "../assets/characters/hachiware/char.ini"
+301 RCDATA "../assets/characters/hachiware/walk.png"
+302 RCDATA "../assets/characters/hachiware/dance.png"
+303 RCDATA "../assets/characters/hachiware/rap.png"
+304 RCDATA "../assets/characters/hachiware/drag.png"
+305 RCDATA "../assets/characters/hachiware/held.png"
+310 RCDATA "../assets/characters/chiikawa/char.ini"
+311 RCDATA "../assets/characters/chiikawa/walk.png"
+312 RCDATA "../assets/characters/chiikawa/dance.png"
+313 RCDATA "../assets/characters/chiikawa/rap.png"
+314 RCDATA "../assets/characters/chiikawa/drag.png"
+315 RCDATA "../assets/characters/chiikawa/held.png"
+320 RCDATA "../assets/characters/rakko/char.ini"
+321 RCDATA "../assets/characters/rakko/walk.png"
+322 RCDATA "../assets/characters/rakko/dance.png"
+323 RCDATA "../assets/characters/rakko/rap.png"
+324 RCDATA "../assets/characters/rakko/drag.png"
+325 RCDATA "../assets/characters/rakko/held.png"
+330 RCDATA "../assets/characters/shisa/char.ini"
+331 RCDATA "../assets/characters/shisa/walk.png"
+332 RCDATA "../assets/characters/shisa/dance.png"
+333 RCDATA "../assets/characters/shisa/rap.png"
+334 RCDATA "../assets/characters/shisa/drag.png"
+335 RCDATA "../assets/characters/shisa/held.png"
+340 RCDATA "../assets/characters/momonga/char.ini"
+341 RCDATA "../assets/characters/momonga/walk.png"
+342 RCDATA "../assets/characters/momonga/dance.png"
+343 RCDATA "../assets/characters/momonga/rap.png"
+344 RCDATA "../assets/characters/momonga/drag.png"
+345 RCDATA "../assets/characters/momonga/held.png"
 
 1 VERSIONINFO
-FILEVERSION 1,1,0,0
-PRODUCTVERSION 1,1,0,0
+FILEVERSION 1,2,0,0
+PRODUCTVERSION 1,2,0,0
 FILEOS 0x40004
 FILETYPE 0x1
 BEGIN
@@ -21,8 +51,8 @@ BEGIN
     BEGIN
       VALUE "FileDescription", "Usagi Desktop Pet"
       VALUE "ProductName", "Usagi Desktop Pet"
-      VALUE "FileVersion", "1.1.0"
-      VALUE "ProductVersion", "1.1.0"
+      VALUE "FileVersion", "1.2.0"
+      VALUE "ProductVersion", "1.2.0"
       VALUE "OriginalFilename", "UsagiDesktopPet.exe"
     END
   END

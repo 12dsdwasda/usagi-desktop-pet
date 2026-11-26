@@ -42,8 +42,10 @@ static std::vector<int> ParseInts(const std::wstring& s) {
     return v;
 }
 
-bool SpriteSet::Load(const std::wstring& assetsDir, std::wstring& err) {
-    const std::wstring ini = assetsDir + L"usagi.ini";
+bool SpriteSet::Load(const std::wstring& assetsDir, const std::wstring& character, std::wstring& err) {
+    const bool usagi = character.empty() || character == L"usagi";
+    const std::wstring dir = usagi ? assetsDir + L"sprites\\" : assetsDir + L"characters\\" + character + L"\\";
+    const std::wstring ini = usagi ? assetsDir + L"usagi.ini" : dir + L"char.ini";
     if (GetFileAttributesW(ini.c_str()) == INVALID_FILE_ATTRIBUTES) {
         err = L"에셋 파일이 없습니다: " + ini;
         return false;
@@ -53,15 +55,23 @@ bool SpriteSet::Load(const std::wstring& assetsDir, std::wstring& err) {
     baseY = IniInt(ini, L"sprites", L"baseY", 344);
     gripX = IniInt(ini, L"drag", L"gripX", 178);
     gripY = IniInt(ini, L"drag", L"gripY", 274);
-    const wchar_t* names[ANIM_COUNT] = {L"walk", L"dance", L"rap", L"drag"};
+    holdX = IniInt(ini, L"held", L"holdX", frameW / 2);
+    holdY = IniInt(ini, L"held", L"holdY", 40);
+    hasHeld = GetFileAttributesW((dir + L"held.png").c_str()) != INVALID_FILE_ATTRIBUTES;
+    const wchar_t* names[ANIM_COUNT] = {L"walk", L"dance", L"rap", L"drag", L"held"};
     for (int a = 0; a < ANIM_COUNT; ++a) {
+        if (a == ANIM_HELD && !hasHeld) {  // 들린 모습이 없으면 걷기 그림으로
+            meta[a] = meta[ANIM_WALK];
+            frames[a] = frames[ANIM_WALK];
+            continue;
+        }
         AnimMeta& m = meta[a];
         m.durationsMs = ParseInts(IniStr(ini, names[a], L"durations", L"150,150,150,150"));
         m.anchorX = IniInt(ini, names[a], L"anchorX", frameW / 2);
         m.left = IniInt(ini, names[a], L"left", 0);
         m.right = IniInt(ini, names[a], L"right", frameW);
         Bitmap sheet;
-        std::wstring path = assetsDir + L"sprites\\" + names[a] + L".png";
+        std::wstring path = dir + names[a] + L".png";
         if (!LoadPng(path, sheet)) {
             err = L"스프라이트를 읽지 못했습니다: " + path;
             return false;

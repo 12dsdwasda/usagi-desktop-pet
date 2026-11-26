@@ -38,6 +38,7 @@ enum MenuId : UINT {
     ID_TOGGLE_VIS = 100, ID_PAUSE, ID_MODE_DANCE, ID_MODE_RAP, ID_MODE_OFF, ID_CANCEL, ID_EXIT, ID_STATUS,
     ID_PRANK_OFF, ID_PRANK_SOMETIMES, ID_PRANK_OFTEN, ID_PRANK_NOW, ID_PRANK_NOTEPAD, ID_BUBBLES,
     ID_VOICE_REC, ID_VOICE_TOGGLE, ID_CURSOR_TOGGLE, ID_CHAT, ID_GEMINI_KEY, ID_ANGRY_TOGGLE, ID_SING_TOGGLE,
+    ID_CHAR_BASE = 900,
     ID_TARGET_BASE = 1000,
 };
 
@@ -67,7 +68,20 @@ const wchar_t* StateName(State s) {
     return L"?";
 }
 
+// 고를 수 있는 캐릭터. persona 는 Gemini 에이전트에게 주는 소개·말투.
+struct CharInfo { const wchar_t* id; const wchar_t* name; const wchar_t* persona; };
+const CharInfo kChars[] = {
+    {L"usagi", L"우사기", L"작은 토끼 캐릭터 '우사기'다. 밝고 장난스럽게 말하고, 말버릇(야하!, 우라!, 푸루!, 하아?, 이~)을 가끔 섞어."},
+    {L"hachiware", L"하치와레", L"머리 위가 파란 고양이 캐릭터 '하치와레'다. 긍정적이고 다정하며 말을 잘한다. 친구를 응원하듯 말해."},
+    {L"chiikawa", L"치이카와", L"작고 하얀 캐릭터 '치이카와'다. 수줍고 겁이 많지만 열심히 한다. 아주 짧게 말하고, 가끔 '와…', '흐에…' 같은 소리를 섞어."},
+    {L"rakko", L"랏코", L"이마에 X 흉터가 있는 해달 캐릭터 '랏코'다. 아주 강한 토벌가답게 침착하고 듬직하게, 멋있게 말해."},
+    {L"shisa", L"시사", L"사자 갈기가 있는 캐릭터 '시사'다. 성실하고 씩씩하며 열심히 일한다. 기운차게 말해."},
+    {L"momonga", L"모몽가", L"파란 꼬리가 복슬복슬한 하늘다람쥐 캐릭터 '모몽가'다. 귀여운 척하며 응석 부리고 조금 제멋대로 말해."},
+};
+constexpr int kCharCount = int(sizeof(kChars) / sizeof(kChars[0]));
+
 struct Settings {
+    std::wstring character = L"usagi";  // kChars 의 id
     double sizeDip = 140;       // 384px 프레임을 화면에 표시할 크기(DIP)
     double walkSpeedDip = 45;   // 걷기 속도 (DIP/초)
     double dragSpeedDip = 70;   // 끌기 속도
@@ -170,6 +184,7 @@ struct App {
     int press = 0;                 // 0 없음, 1 눌렀음(아직 클릭인지 모름), 2 잡는 중
     POINT pressPt{}, hookPt{};
     double pressT = 0, lastHookEvent = 0, grabOffX = 0, grabOffY = 0, vx = 0, vy = 0;
+    double heldSideUntil = 0, heldT = 0;  // 들린 모습: 옆으로 끌려가는 포즈 유지 시각, 흔들림 시간
     struct Sample { double t, x, y; };
     std::vector<Sample> trail;     // 잡고 있는 동안 포인터 궤적 (던지는 속도 계산)
     int bounces = 0;
@@ -235,6 +250,12 @@ double UserIdleSec() { return (GetTickCount() - LastInputTick()) / 1000.0; }
 void ScheduleNextPrank(double now) {
     if (g.cfg.prank == PRANK_OFTEN) g.nextPrank = now + Rand(60, 180);
     else g.nextPrank = now + Rand(300, 600);
+}
+
+const CharInfo& CurChar() {
+    for (const CharInfo& c : kChars)
+        if (g.cfg.character == c.id) return c;
+    return kChars[0];
 }
 
 // ---------- 기하 ----------
@@ -812,6 +833,8 @@ void BeginHeld(double now) {
     g.grabOffX = g.px - g.pressPt.x;
     g.grabOffY = g.py - g.pressPt.y;
     g.sleeping = false;
+    g.heldT = 0;
+    g.heldSideUntil = 0;
     Log(L"held: 잡힘");
     Say(L"하아? 하아?");
     SetState(State::Held);
@@ -950,6 +973,26 @@ void TickHeld(double now, double dt) {
         return;
     }
     SetAnim(ANIM_WALK);
+    if (g.state == State::Held && g.sprites.hasHeld) {
+        TrailAdd(now, c.x, c.y);
+        // 최근 0.12초 포인터 가로 속도로 옆으로 끌려가는 포즈인지 정한다
+        double hv = 0;
+        for (auto it = g.trail.rbegin(); it != g.trail.rend(); ++it)
+            if (now - it->t >= 0.04) { hv = (c.x - it->x) / std::max(0.04, now - it->t); if (now - it->t > 0.12) break; }
+        if (std::abs(hv) > 700 * g.mon.scale) { g.heldSideUntil = now + 0.3; g.facing = hv > 0 ? 1 : -1; }
+        SetAnim(ANIM_HELD);
+        g.heldT += dt;
+        int sub = int(g.heldT * 1000 / 170) % 4;
+        g.frame = (now < g.heldSideUntil ? 4 : 0) + sub;
+        if (int(g.sprites.frames[ANIM_HELD].size()) <= g.frame) g.frame = sub;
+        bool flip = Flipped();
+        const AnimMeta& m = g.sprites.meta[ANIM_HELD];
+        double ax = flip ? g.sprites.frameW - m.anchorX : m.anchorX;
+        double hx = flip ? g.sprites.frameW - g.sprites.holdX : g.sprites.holdX;
+        g.px = c.x - (hx - ax) * g.s;
+        g.py = c.y - (g.sprites.holdY - g.sprites.baseY) * g.s;
+        return;
+    }
     if (g.state == State::Held) {
         AdvanceDefault(dt * 2.5);  // 다리를 버둥버둥
         double nx = c.x + g.grabOffX;
@@ -1226,6 +1269,8 @@ std::wstring SaveNoteFile(const std::wstring& text) {
 
 void InitAgent() {
     AgentHost h;
+    h.name = [] { return std::wstring(CurChar().name); };
+    h.persona = [] { return std::wstring(CurChar().persona); };
     h.say = [](const std::wstring& t, double sec) {
         std::wstring x = t.size() > 160 ? t.substr(0, 157) + L"…" : t;
         Say(x.c_str(), sec);
@@ -1528,7 +1573,7 @@ void AddTray() {
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     nid.uCallbackMessage = WM_TRAY;
     nid.hIcon = g.icon ? g.icon : LoadIcon(nullptr, IDI_APPLICATION);
-    wcscpy_s(nid.szTip, L"우사기 데스크톱 펫");
+    swprintf_s(nid.szTip, L"%s 데스크톱 펫", CurChar().name);
     g.trayAdded = Shell_NotifyIconW(NIM_ADD, &nid) != FALSE;
 }
 void RemoveTray() {
@@ -1538,10 +1583,43 @@ void RemoveTray() {
     Shell_NotifyIconW(NIM_DELETE, &nid);
 }
 
+void UpdateTrayIcon() {
+    NOTIFYICONDATAW nid{sizeof(nid)};
+    nid.hWnd = g.msg;
+    nid.uID = 1;
+    nid.uFlags = NIF_ICON | NIF_TIP;
+    nid.hIcon = g.icon ? g.icon : LoadIcon(nullptr, IDI_APPLICATION);
+    swprintf_s(nid.szTip, L"%s 데스크톱 펫", CurChar().name);
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
 void CancelBusy() {
     if (g.state == State::CursorChase || g.state == State::CursorDrag) return EndCursor(L"사용자 취소", L"하아?");
     if (g.state == State::PrankLaunch || g.state == State::PrankWalk || g.state == State::PrankType) EndPrank(L"사용자 취소", L"하아?");
     else Release(L"사용자 취소", L"하아?");
+}
+
+// 캐릭터 바꾸기: 스프라이트를 새로 읽고 설정 파일에 저장한다
+bool SwitchCharacter(const std::wstring& id) {
+    SpriteSet ns;
+    std::wstring err;
+    if (!ns.Load(AssetsDir(), id, err)) { Log(L"character: %s 실패 (%s)", id.c_str(), err.c_str()); return false; }
+    if (g.state == State::Held || g.state == State::Angry || g.state == State::AngryThrow) return false;
+    if (Busy()) CancelBusy();
+    g.sprites = std::move(ns);
+    g.cache.Reset();
+    g.drawn.size = -1;
+    g.anim = -1;
+    SetAnim(ANIM_WALK);
+    g.cfg.character = id;
+    WritePrivateProfileStringW(L"pet", L"character", id.c_str(), SettingsPath().c_str());
+    HICON old = g.icon;
+    g.icon = MakeIconFromBitmap(g.sprites.frames[ANIM_WALK][0], GetSystemMetrics(SM_CXSMICON) * 2);
+    UpdateTrayIcon();
+    if (old) DestroyIcon(old);
+    Log(L"character: %s", id.c_str());
+    Say((std::wstring(CurChar().name) + L" 등장!").c_str(), 2.2);
+    return true;
 }
 
 void ApplyMode(MusicMode m) {
@@ -1566,6 +1644,14 @@ void ShowTrayMenu() {
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, ID_TOGGLE_VIS, g.visible ? L"캐릭터 숨기기" : L"캐릭터 보이기");
     AppendMenuW(menu, MF_STRING | (g.paused ? MF_CHECKED : 0), ID_PAUSE, L"이동 일시정지");
+    HMENU cm = CreatePopupMenu();
+    int curChar = 0;
+    for (int i = 0; i < kCharCount; ++i) {
+        AppendMenuW(cm, MF_STRING, ID_CHAR_BASE + i, kChars[i].name);
+        if (g.cfg.character == kChars[i].id) curChar = i;
+    }
+    CheckMenuRadioItem(cm, ID_CHAR_BASE, ID_CHAR_BASE + kCharCount - 1, ID_CHAR_BASE + curChar, MF_BYCOMMAND);
+    AppendMenuW(menu, MF_POPUP, UINT_PTR(cm), L"캐릭터 고르기");
     HMENU mm = CreatePopupMenu();
     AppendMenuW(mm, MF_STRING, ID_MODE_DANCE, L"춤");
     AppendMenuW(mm, MF_STRING, ID_MODE_RAP, L"랩");
@@ -1666,7 +1752,8 @@ void ShowTrayMenu() {
         case ID_CANCEL: CancelBusy(); break;
         case ID_EXIT: DestroyWindow(g.msg); break;
         default:
-            if (cmd >= ID_TARGET_BASE && cmd < ID_TARGET_BASE + g.menuTargets.size())
+            if (cmd >= ID_CHAR_BASE && cmd < UINT(ID_CHAR_BASE + kCharCount)) SwitchCharacter(kChars[cmd - ID_CHAR_BASE].id);
+            else if (cmd >= ID_TARGET_BASE && cmd < ID_TARGET_BASE + g.menuTargets.size())
                 BeginApproach(g.menuTargets[cmd - ID_TARGET_BASE].hwnd);
     }
 }
@@ -1704,6 +1791,7 @@ void HandleCommand(const std::wstring& c) {
     else if (c == L"voice-dialog") ShowVoiceDialog(g.inst, &g.voices, PlayedVoice);
     else if (c == L"voice-refresh") g.voices.Refresh();
     else if (c == L"chat-open") Agent::Open();
+    else if (auto ch = arg(L"character ")) SwitchCharacter(ch);
     else if (c == L"angry") g.angryPending = true;
     else if (auto ct = arg(L"chat ")) { Agent::Open(); Agent::Submit(ct); }
     else if (auto p = arg(L"goto ")) {  // goto x y  (테스트용: 위치 지정)
@@ -1783,6 +1871,7 @@ void LoadSettings() {
     c.voice = IniInt(f, L"voice", L"enabled", 1) != 0;
     c.cursorGrab = IniInt(f, L"cursor", L"enabled", 1) != 0;
     c.grabbable = IniInt(f, L"pet", L"grabbable", 1) != 0;
+    c.character = IniStr(f, L"pet", L"character", L"usagi");
     c.agentModels = IniStr(f, L"agent", L"models", c.agentModels.c_str());
     c.chatHotkey = IniInt(f, L"agent", L"hotkey", 1) != 0;
     c.angry = IniInt(f, L"angry", L"enabled", 1) != 0;
@@ -1829,6 +1918,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
         else if (a == L"--quit") cmds.push_back(L"quit");
         else if (a == L"--chat") cmds.push_back(L"chat " + next());
         else if (a == L"--chat-open") cmds.push_back(L"chat-open");
+        else if (a == L"--character") cmds.push_back(L"character " + next());
         else if (a == L"--angry") cmds.push_back(L"angry");
         else if (a == L"--set-gemini-key" || a == L"--clear-gemini-key") {
             // 키는 이 프로세스에서 바로 암호화해 저장하고, 실행 중인 펫에는 보내지 않는다
@@ -1859,7 +1949,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     g.inst = inst;
     LoadSettings();
     std::wstring err;
-    if (!g.sprites.Load(AssetsDir(), err)) {
+    if (!g.sprites.Load(AssetsDir(), g.cfg.character, err) && (g.cfg.character = L"usagi", !g.sprites.Load(AssetsDir(), L"usagi", err))) {
         MessageBoxW(nullptr, err.c_str(), L"우사기 데스크톱 펫", MB_ICONERROR);
         return 1;
     }
